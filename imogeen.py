@@ -6,12 +6,12 @@ import os
 import json
 import time
 import re
-import urllib
+import httplib
 import urllib2
 import codecs
 import threading
 from BeautifulSoup import BeautifulSoup
-from operator import itemgetter
+# from operator import itemgetter
 from optparse import OptionParser
 # }}}
 
@@ -21,12 +21,16 @@ def get_url_response(url):
     # Send request to given url and fetch response
     headers     = { 'User-Agent' : 'Mozilla/5.0' }
     request     = urllib2.Request(url, headers=headers)
-    opener      = urllib2.build_opener()
-    opener.addheaders.append(('Cookie', 'LC_layout=old'));
-    response    = urllib2.urlopen(request)
 
-    # If response code is 200 return response, else None
-    return response if response.getcode() == 200 else None
+    response = None
+    try:
+        response = urllib2.urlopen(request)
+        if response.getcode() != 200:
+            response = None
+    except httplib.BadStatusLine:
+        print "Could not fetch url '%s'." % url
+
+    return response
 
 def get_parsed_url_response(url):
     """Send request to given url and return parsed HTML response."""
