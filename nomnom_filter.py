@@ -13,8 +13,8 @@ import gdata.spreadsheet.service
 from gdata.service import CaptchaRequired
 from optparse import OptionParser
 from urlparse import urlparse
-# from multiprocessing.dummy import Pool
-from imogeen import get_url_response
+from filecache import filecache
+from imogeen import get_parsed_url_response
 # }}}
 
 def get_auth_data(file_name):
@@ -104,21 +104,21 @@ def filter_nomnoms(row, lock, filtered_recipes, contains_re, filter_re):
         return
 
     # Check if current recipe matches given filters.
-    filtered_recipe = False
-    recipe_url      = urlparse(recipe_cell)
+    filtered_recipe  = False
+    recipe_url       = urlparse(recipe_cell)
+    recipe_url_value = recipe_url.geturl()
     # Check for correct url.
     if recipe_url.scheme and recipe_url.netloc:
         # Print info.
         with lock:
-            print("\tProcessing url '%s'." % recipe_url.geturl())
+            print("\tProcessing url '%s'." % recipe_url_value)
 
-        # Fetch recipe page.
-        recipe_page = get_url_response(recipe_url.geturl())
+        # Fetch parsed recipe page.
+        recipe_page = get_nomnom_page(recipe_url_value)
         if recipe_page:
             # Check page content with given filters.
-            if filter_recipe(recipe_page.read(), contains_re, filter_re):
+            if filter_recipe(recipe_page, contains_re, filter_re):
                 filtered_recipe = True
-            recipe_page.close()
     # No url given - treat cell content as recipe.
     else:
         if filter_recipe(recipe_cell, contains_re, filter_re):
@@ -126,10 +126,47 @@ def filter_nomnoms(row, lock, filtered_recipes, contains_re, filter_re):
 
     # Append filtered row.
     with lock:
-        if filtered_recipe:
-            filtered_recipes.append(row)
+        if filtered_recipe and not filtered_recipes.has_key(recipe_url_value):
+            filtered_recipes[recipe_url_value] = row
 
     return
+
+# Invalidate values after 7 days.
+@filecache(7 * 24 * 60 * 60)
+def get_nomnom_page(recipe_url):
+    # Get BeautifulSoup page instance.
+    parser = get_parsed_url_response(recipe_url)
+
+    if parser:
+        # Don't search in header.
+        parser = parser.find('body')
+
+        # Remove <a> tags from page.
+        [a.extract() for a in parser.findAll('a')]
+
+        # Remove <form> tags from page.
+        [form.extract() for form in parser.findAll('form')]
+
+        # Remove all hidden items.
+        [elem.extract() for elem in parser.findAll(None, { 'display': 'none' })]
+
+        # Remove comments.
+        comments = ('comment', 'koment')
+        for comment in comments:
+            comment_re = re.compile('.*' + comment + '.*', re.I)
+            [elem.extract() for elem in parser.findAll(
+                None,
+                { 'id': comment_re }
+            )]
+            [elem.extract() for elem in parser.findAll(
+                None,
+                { 'class': comment_re }
+            )]
+
+        # Convert back to string.
+        parser = unicode(parser)
+
+    return parser
 
 def filter_recipe(recipe_page, contains_re, filter_re):
     return (
@@ -142,7 +179,7 @@ def filter_recipe_cells(recipe_cells, options):
         return
 
     # Will contain filtered results.
-    filtered_recipes = []
+    filtered_recipes = {}
 
     # Values for 'contains' and 'filter' options are joined by a comma.
     joiner = re.compile('\s*,\s*')
@@ -186,7 +223,7 @@ def filter_recipe_cells(recipe_cells, options):
             for thread in recipe_threads:
                 thread.join()
 
-    return filtered_recipes
+    return filtered_recipes.values()
 
 def get_worksheet_name(options):
     """ Get name of writable worksheet. """
@@ -226,6 +263,10 @@ def get_writable_worksheet(client, worksheet_name):
             col_count=20,
             key=spreadsheet_id
         )
+    # Clear worksheet.
+    else:
+        # TODO
+        pass
 
     return worksheet
 
