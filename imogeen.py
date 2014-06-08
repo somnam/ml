@@ -27,8 +27,8 @@ def get_url_response(url):
         response = urllib2.urlopen(request)
         if response.getcode() != 200:
             response = None
-    except httplib.BadStatusLine:
-        print "Could not fetch url '%s'." % url
+    except (httplib.BadStatusLine, urllib2.HTTPError):
+        print "\tCould not fetch url '%s'." % url
 
     return response
 

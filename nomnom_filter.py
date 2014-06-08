@@ -47,8 +47,8 @@ def connect_to_service(auth_data):
 
     return client
 
-def retrieve_recipe_cells(client, dst_worksheet):
-    if not(client and dst_worksheet):
+def retrieve_recipe_cells(client):
+    if not client:
         return
 
     # Prepare cells query.
@@ -63,10 +63,6 @@ def retrieve_recipe_cells(client, dst_worksheet):
     recipe_cells    = []
     # Skip first worksheet, it doesn't contain recipes.
     for worksheet in work_feed.entry[1:]:
-        # Skip worksheet to which we will write.
-        if worksheet.id.text == dst_worksheet.id.text:
-            continue
-
         # Fetch worksheet cells.
         print("\tFetching worksheet '%s'." % worksheet.title.text)
         worksheet_id = worksheet.id.text.rsplit('/', 1)[-1]
@@ -350,27 +346,30 @@ def main():
         print("Authenticating to Google service.")
         client = connect_to_service(auth_data)
 
-        # Get worksheet for writing recipes.
-        dst_worksheet_name = get_worksheet_name(options)
-        print("Fetching destination worksheet '%s'." % dst_worksheet_name)
-        dst_worksheet = get_writable_worksheet(
-            client, dst_worksheet_name
-        )
-
         print("Retrieving recipes.")
-        recipe_cells = retrieve_recipe_cells(client, dst_worksheet)
+        recipe_cells = retrieve_recipe_cells(client)
 
         print("Filtering recipes.")
         filtered_recipes = filter_recipe_cells(recipe_cells, options)
 
-        print("Fetching destination cells.")
-        dst_cells = get_writable_cells(
-            client, dst_worksheet, filtered_recipes
-        )
+        # Write recipes only when any were found.
+        if filtered_recipes:
+            # Get worksheet for writing recipes.
+            dst_worksheet_name = get_worksheet_name(options)
+            print("Fetching destination worksheet '%s'." % dst_worksheet_name)
+            dst_worksheet = get_writable_worksheet(
+                client, dst_worksheet_name
+            )
 
-        print("Writing filtered recipes.")
-        write_recipes(client, dst_cells, filtered_recipes)
+            print("Fetching destination cells.")
+            dst_cells = get_writable_cells(
+                client, dst_worksheet, filtered_recipes
+            )
 
+            print("Writing filtered recipes.")
+            write_recipes(client, dst_cells, filtered_recipes)
+        else:
+            print("No recipes found :(.")
 
 if __name__ == "__main__":
     main()
