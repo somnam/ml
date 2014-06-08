@@ -10,6 +10,7 @@ import httplib
 import urllib2
 import codecs
 import threading
+from filecache import filecache
 from BeautifulSoup import BeautifulSoup
 # from operator import itemgetter
 from optparse import OptionParser
@@ -115,9 +116,13 @@ def get_books_on_page(pager_page):
 
     return books
 
-def get_book_info(book_page, book_url):
+# Invalidate values after 7 days.
+@filecache(7 * 24 * 60 * 60)
+def get_book_info(book_url):
     """Get all kinds of info on book."""
     
+    book_page = get_parsed_url_response(book_url)
+
     book_info = None
     if book_page:
 
@@ -131,7 +136,7 @@ def get_book_info(book_page, book_url):
 
         # Get book details.
         book_details    = book_page.find('div', { 'id': 'dBookDetails' })
-        book_category   = book_details.find('a', { 'class': 'blue small' })
+        book_category   = book_details.find('a', { 'itemprop': 'genre' })
         book_isbn       = book_details.find('span', { 'itemprop': 'isbn' })
 
         # Get original title if present.
@@ -156,9 +161,8 @@ def get_book_info(book_page, book_url):
     return book_info
 
 def fetch_shelf_book(counter, book, shelf_books, lock):
-    book_url    = book['href']
-    book_page   = get_parsed_url_response(book_url)
-    book_info   = get_book_info(book_page, book_url)
+    book_url  = book['href']
+    book_info = get_book_info(book_url)
 
     with lock:
         if book_info:
