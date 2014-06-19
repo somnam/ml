@@ -14,15 +14,12 @@ from gdata.service import CaptchaRequired
 from optparse import OptionParser
 from urlparse import urlparse
 from filecache import filecache
-from imogeen import get_parsed_url_response
+from imogeen import get_parsed_url_response, get_file_path
 # }}}
 
 def get_auth_data(file_name):
 
-    file_path = os.path.join(
-        os.path.dirname(__file__),
-        file_name
-    )
+    file_path = get_file_path(file_name)
 
     auth_data = None
     with codecs.open(file_path, 'r', 'utf-8') as file_handle:
@@ -234,7 +231,7 @@ def get_worksheet_name(options):
 
     return worksheet_name
 
-def get_writable_worksheet(client, worksheet_name):
+def get_writable_worksheet(client, worksheet_name, row_count=100):
     # Fetch spreadsheet id.
     spreadsheet_id = retrieve_spreadsheet_id(client)
 
@@ -255,7 +252,7 @@ def get_writable_worksheet(client, worksheet_name):
         worksheet = client.AddWorksheet(
             title=worksheet_name,
             # Arbitrary number of rows. Must be later adjusted to no. of hits.
-            row_count=100,
+            row_count=row_count,
             col_count=20,
             key=spreadsheet_id
         )
@@ -280,14 +277,14 @@ def decode_options(options):
 
     return
 
-def get_writable_cells(client, dst_worksheet, filtered_recipes):
+def get_writable_cells(client, dst_worksheet, entries):
 
     # TODO: extend worksheet rows count to fit found hits.
-    filtered_recipes_len = len(filtered_recipes)
+    entries_len = len(entries)
 
     cell_query = gdata.spreadsheet.service.CellQuery()
     cell_query.return_empty = 'true'
-    cell_query.max_row = '%d' % filtered_recipes_len
+    cell_query.max_row = '%d' % entries_len
     cell_query.max_col = '2'
 
     return client.GetCellsFeed(
