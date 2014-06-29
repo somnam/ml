@@ -6,6 +6,7 @@ import os
 import json
 import time
 import re
+import gc
 import httplib
 import urllib2
 import codecs
@@ -67,8 +68,12 @@ def get_library_url(profile_page):
 def get_shelf_url(library_page, shelf):
     shelf_url = None
     if library_page:
-        to_read_re     = re.compile(shelf)
-        shelf_url_base = library_page.find('a', { 'href' : to_read_re })
+        to_read_re       = re.compile('%s\/lista' % shelf)
+        to_read_class_re = re.compile('shelf-name')
+        shelf_url_base = library_page.find(
+            'a',
+            { 'href': to_read_re, 'class': to_read_class_re }
+        )
         shelf_url      = get_site_url(shelf_url_base['href'])
 
     return shelf_url
@@ -142,11 +147,14 @@ def get_book_info(book_url):
         # Get original title if present.
         book_original_title     = None
         book_original_title_re  = re.compile('tytu?')
+        # Get pages number.
+        book_pages_no = None
+        book_pages_no_re = re.compile('liczba stron')
         for div in book_details.findAll('div', { 'class': 'profil-desc-inline' }):
             if div.find(text=book_original_title_re):
                 book_original_title = div.find('dd').string
-                break
-
+            elif div.find(text=book_pages_no_re):
+                book_pages_no = div.find('dd').string
 
         book_info = {
             'title'             : book_title.string,
@@ -155,6 +163,7 @@ def get_book_info(book_url):
             'category'          : book_category.string,
             # ISBN is not always present.
             'isbn'              : book_isbn.string if book_isbn else None,
+            'pages'             : book_pages_no,
             'url'               : book_url,
         }
 
@@ -201,6 +210,8 @@ def collect_shelf_books(pager_count, pager_url_base):
                 thread.start()
             for thread in book_threads:
                 thread.join()
+
+            gc.collect()
 
     return shelf_books
 
@@ -264,8 +275,10 @@ if __name__ == "__main__":
     option_parser = OptionParser()
 
     # Add options
-    option_parser.add_option("-r", "--to-read", action="store_true")
+    option_parser.add_option("-t", "--to-read", action="store_true")
     option_parser.add_option("-o", "--owned", action="store_true")
+    option_parser.add_option("-r", "--read", action="store_true")
+    option_parser.add_option("-s", "--shelf")
     option_parser.add_option("-i", "--profile-id")
 
     (options, args) = option_parser.parse_args()
@@ -273,12 +286,16 @@ if __name__ == "__main__":
     if not options.profile_id:
         options.profile_id = 10058
 
-    if not options.to_read and not options.owned:
+    if not (options.to_read or options.owned or options.read or options.shelf):
         # Display help
         option_parser.print_help()
     elif options.to_read:
         # Scan to read list
         fetch_shelf_list(options.profile_id, 'chce-przeczytac')
+    elif options.read:
+        fetch_shelf_list(options.profile_id, 'przeczytane')
+    elif options.shelf:
+        fetch_shelf_list(options.profile_id, options.shelf)
     elif options.owned:
         # Scan owned list.
         fetch_shelf_list(options.profile_id, 'posiadam')
