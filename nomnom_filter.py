@@ -3,7 +3,6 @@
 
 # Import {{{
 import sys
-import os
 import re
 import json
 import codecs
@@ -167,6 +166,10 @@ def filter_recipe(recipe_page, contains_re, filter_re):
         (filter_re and not filter_re.search(recipe_page))
     )
 
+def get_step_end_index(rows_len, step, i):
+    # return (i+step-1) if (i+step-1) < rows_len else rows_len-1
+    return (i+step) if (i+step) < rows_len else rows_len
+
 def filter_recipe_cells(recipe_cells, options):
     if not recipe_cells:
         return
@@ -199,7 +202,7 @@ def filter_recipe_cells(recipe_cells, options):
 
         # Create treads per group.
         for i in range(rows_len)[::step]:
-            j = (i+step-1) if (i+step-1) < rows_len else rows_len-1
+            j = get_step_end_index(rows_len, step, i)
 
             # Start a new thread for each row.
             recipe_threads = [
