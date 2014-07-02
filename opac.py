@@ -16,7 +16,7 @@ import urllib2
 import cookielib
 from BeautifulSoup import BeautifulSoup
 from optparse import OptionParser
-from imogeen import get_file_path
+from imogeen import get_file_path, dump_books_list
 from nomnom_filter import get_step_end_index
 # }}}
 
@@ -219,7 +219,6 @@ def extract_book_info_params(dump_file_name, book):
     # Extract params for GET book info request.
     get_params = None
     for a in results_a:
-        print(a.string.lstrip().replace('-', ''), isbn)
         if a.string.lstrip().replace('-', '') == isbn:
             onclick = a['onclick']
             match   = re.findall("'[^']+'", onclick)
@@ -229,7 +228,50 @@ def extract_book_info_params(dump_file_name, book):
 
     return get_params
 
-def fetch_book_info(info_params):
+def extract_book_info_from_response(response):
+    if not response:
+        return
+
+    info_by_library = []
+
+    div = BeautifulSoup(
+        response,
+        convertEntities=BeautifulSoup.HTML_ENTITIES
+    ).find('div', { 'id': 'zasob' })
+
+    # Fetch 'td' tags containing book info by child element.
+    warnings = div.findAll('div', { 'class': 'opis_uwaga' })
+    info_td  = [ div.parent for div in warnings ]
+
+    # Fetch department, address and availability info.
+    re_department = re.compile('\([^\)]+\)')
+    re_address    = re.compile('\,[^\,]+\,')
+    for td in info_td:
+        td_text = td.text
+
+        # Get department string.
+        department = re_department.search(td_text)
+        if department:
+            department = department.group()
+
+        # Get address string.
+        address = re_address.search(td_text)
+        if address:
+            address = address.group().replace(',', '').lstrip()
+
+        # Get availability info.
+        availability = td.find('div', { 'class': 'opis_uwaga' }).string
+        if not availability:
+            availability = u'Dostępna'
+
+        info_by_library.append(
+            '%s - %s - %s' % 
+            (department, address, availability)
+        )
+
+    return info_by_library
+
+def fetch_book_info(book, info_params):
     if not info_params:
         return
 
@@ -271,7 +313,13 @@ def fetch_book_info(info_params):
     request           = urllib2.Request(book_url)
     response_string   = opener.open(request).read()
 
-    return response_string
+    info_by_library = extract_book_info_from_response(response_string)
+
+    return {
+        'author': book['author'],
+        'title' : book['title'],
+        'info'  : info_by_library,
+    }
 
 def buu():
     import re
@@ -353,10 +401,10 @@ def get_books_list(file_name):
 
     return books_list
 
-def book_dispatcher(book, lock):
+def book_dispatcher(book, lock, books_info):
     # Skip empty entries.
     if not book:
-        return
+        return books_info
 
     with lock:
         # Print info.
@@ -368,42 +416,61 @@ def book_dispatcher(book, lock):
         # Search by title - author is not supported yet.
         if not book['isbn']:
             print(
-                "\tSkipping book '%s - %s'." %
+                "\tSkipping book '%s - %s' - no isbn." %
                 (book['author'], book['title'])
             )
             return
 
-    # Get dump file name for current book.
-    dump_file_name = '%s.html' % book['isbn']
+    # Retry operation 5 times before giving up.
+    retry = 5
+    while retry:
+        # Get dump file name for current book.
+        dump_file_name = '%s.html' % book['isbn']
 
-    # Search and dump results file.
-    with lock:
-        print("\t\tQuerying OPAC server.")
-    query_and_dump_results(book, dump_file_name)
+        # Search and dump results file.
+        with lock:
+            print("\t\tQuerying OPAC server.")
+        query_and_dump_results(book, dump_file_name)
 
-    # Extract info url from dump.
-    with lock:
-        print("\t\tFetching book link.")
-    info_params = extract_book_info_params(dump_file_name, book)
+        # Extract info url from dump.
+        with lock:
+            print("\t\tFetching book link.")
+        info_params = extract_book_info_params(dump_file_name, book)
 
-    # Remove dump file.
-    os.remove(dump_file_name)
+        # Remove dump file.
+        os.remove(dump_file_name)
+
+        # Retry fetching info?
+        if info_params:
+            with lock:
+                print("\t\tBook link fetched.")
+            retry = 0
+        else:
+            retry = retry - 1
+            with lock:
+                print("\t\tRetrying ...")
 
     # Fetch book info.
     with lock:
         print("\t\tFetching book info.")
-    book_info = fetch_book_info(info_params)
+    book_info = fetch_book_info(book, info_params)
 
     if book_info:
         with lock:
             print("\t\tWriting book info.")
-            book_info = book_info.decode('utf-8')
-            with codecs.open('./results.html', 'a', 'utf-8') as file_handle:
-                file_handle.writelines(book_info)
+            books_info.append(book_info)
+    else:
+        with lock:
+            print("\t\tBook info not found.")
+
+    return books_info
 
 def get_library_status(books_list):
     if not books_list:
         return
+
+    # Will contains books info.
+    books_info = []
 
     # Lock for writing book info.
     lock = threading.Lock()
@@ -416,14 +483,11 @@ def get_library_status(books_list):
     for i in range(books_count)[::books_step]:
         j = get_step_end_index(books_count, books_step, i)
 
-        # for book in books_list[i:j]:
-        #     book_dispatcher(book)
-
         # Start a new thead for each book.
         book_threads = [
             threading.Thread(
                 target=book_dispatcher,
-                args=(book, lock)
+                args=(book, lock, books_info)
             )
             for book in books_list[i:j]
         ]
@@ -433,6 +497,8 @@ def get_library_status(books_list):
             thread.start()
         for thread in book_threads:
             thread.join()
+
+    return books_info
 
 def main():
     # Cmd options parser
@@ -460,6 +526,8 @@ def main():
         # Fetch books library status.
         print('Fetching books library status.')
         library_status = get_library_status(books_list)
+
+        dump_books_list(library_status, 'opac.json')
 
     # pex()
     # buu()
