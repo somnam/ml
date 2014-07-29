@@ -1,266 +1,211 @@
-#!/usr/bin/pyth n -tt
 # -*- coding: utf-8 -*-
 
-# Import {{{
 import os
-import codecs
-import json
-import sys
 import re
-import subprocess
-import threading
-import pexpect
+import sys
 import time
+import json
 import codecs
-import urllib2
-import cookielib
-from BeautifulSoup import BeautifulSoup
+import socket
+import shutil
+import subprocess
+import gdata.spreadsheet.service
 from optparse import OptionParser
+from selenium import webdriver
+from selenium.webdriver.support.ui import Select
+from selenium.webdriver.support.ui import WebDriverWait
+from selenium.webdriver.support import expected_conditions
+from selenium.webdriver.common.by import By
+from selenium.webdriver.common.keys import Keys
 from imogeen import get_file_path, dump_books_list
-from nomnom_filter import get_step_end_index
-# }}}
+from nomnom_filter import (
+    get_auth_data,
+    connect_to_service,
+    get_writable_worksheet,
+    get_writable_cells
+)
 
-KEY_DOWN       = '\x1b[B'
-KEY_ESCAPE     = '\x1b'
-KEY_BACKSPACE  = '\x7f'
+# Lovely constants.
 OPAC_URL       = 'http://opac.ksiaznica.bielsko.pl/'
+SOCKET_TIMEOUT = 4.0
+REFRESH_SCRIPT = 'imogeen'
+SHELF_NAME     = 'polowanie'
 
-def test(): # {{{
-    import urllib
-    import urllib2
-    import cookielib
+def browser_start():
+    print(u'Starting browser.')
+    # Set browser profile.
+    profile = webdriver.FirefoxProfile('./firefox.selenium')
 
-    # Get session and cookie.
-    host_ip            = '212.244.68.155'
-    opac_link          = 'http://%s/Opac4/' % host_ip
-    form_link          = '%sfaces/Szukaj.jsp' % opac_link
-    autocompleter_link = '%sfaces/ax/autocmp.jsp' % opac_link
+    # Load webdriver.
+    browser = webdriver.Firefox(firefox_profile=profile)
+    # Some of sites elements are loaded via ajax - wait for them.
+    browser.implicitly_wait(1)
+    return browser
 
-    # Prepare cookie jar.
-    cookie_jar = cookielib.CookieJar()
-    opener     = urllib2.build_opener(
-        urllib2.HTTPCookieProcessor(cookie_jar),
-        urllib2.HTTPHandler(debuglevel=1),
-    )
-
-    headers   = {
-        # 'Accept':          "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
-        # 'Accept-Encoding': "gzip, deflate",
-        # 'Accept-Language': "en-US,en;q=0.5",
-        # 'Connection':      'keep-alive',
-        'Host':            host_ip,
-        'Referer':         opac_link,
-        'User-Agent':      "Mozilla/5.0",
-    }
-
-    opener.addheaders = [(key, headers[key]) for key in headers.keys()];
-    request           = urllib2.Request(opac_link)
-    response          = opener.open(request)
-
-    # ck = cookielib.Cookie(version=0, name='haslo_hist', value="", port=None, port_specified=False, domain=host_ip, domain_specified=False, domain_initial_dot=False, path='/Opac4/', path_specified=True, secure=False, expires=None, discard=True, comment=None, comment_url=None, rest={'HttpOnly': None}, rfc2109=False)
-    # cookie_jar.set_cookie(ck)
-
-    payload_autocompleter = {
-        'idx' : 3,
-        'txt' : 9788307033044,
-    }
-
-    # Append headers required by POST request.
-    cookies = {}
-    for cookie in cookie_jar:
-        cookies[cookie.name] = cookie.value
-
-    cookie_header = '; '.join( '%s=%s' % (key, cookies[key]) for key in cookies.keys())
-
-    post_suffix = ';jsessionid=%s' % cookies['JSESSIONID']
-    post_link   = '%s%s' % (form_link, post_suffix)
-
-    payload_form = {
-        # Index search method.
-        'form1:btnSzukajIndeks': 'Szukaj',
-
-        # Resource type:
-        # 1 - Author
-        # 2 - Title
-        # 3 - ISBN
-        # 4 - Series
-        # 'form1:dropdown1': 3,
-        'form1:dropdown1': "1",
-
-        # Resource type:
-        # 1  - All
-        # 2  - Book
-        # 9  - Magazine
-        # 15 - Audiobook
-        'form1:dropdown4': "2",
-
-        # Search phrase.
-        # 'form1:textField1': 9788307033044,
-        'form1:textField1': "vandermeer",
-
-        # 'Ustaw początek indeksu na podaną frazę'.
-        'rbOperStem': "a",
-
-        # Index.
-        'form1:hidIdxId': "1",
-        # 'form1:hidHistId': "",
-
-        # Rubbish.
-        'form1:textField2': "",
-        'form1:textField3': "",
-        'form1:textField4': "",
-        'form1:textField5': "",
-        'form1:dropdown2':  "2",
-        'form1:dropdown3':  "3",
-        'form1:dropdown4':  "2",
-        'form1:dropdown5':  "20",
-        'form1:dropdown6':  "-1",
-        'rbOper1':          'a',
-        'rbOper2':          'a',
-        'rbOper1':          'a',
-        'rbOper2':          'a',
-
-        # Rubbish 2.
-        'form1_hidden':                                               'form1_hidden',
-        'javax.faces.ViewState':                                      'j_id24020:j_id24021',
-        'com_sun_rave_web_ui_appbase_renderer_CommandLinkRendererer': "",
-    }
-
-    # POST headers.
-    headers['Referer']      = form_link
-    headers['Content-Type'] = 'application/x-www-form-urlencoded'
-    headers['Cookie']       = cookie_header
-    headers['Connection']   = 'keep-alive'
-    opener.addheaders       = [(key, headers[key]) for key in headers.keys()];
-
-    # request  = urllib2.Request(autocompleter_link, urllib.urlencode(payload_autocompleter))
-    # response = opener.open(request)
-    request  = urllib2.Request(post_link, urllib.urlencode(payload_form))
-    response = opener.open(request)
-# }}}
-
-def query_and_dump_results(book, dump_file_name):
-    # elinks browser instance.
-    elinks = pexpect.spawn('elinks about:', timeout=10)
-
-    # Open url.
-    elinks.send('g')
-    elinks.sendline(OPAC_URL)
-
-    # "Wait for page to load."
-    time.sleep(0.5)
-    elinks.expect('Katalog Patron 3 Opac')
-
-    # "Go to author search field."
-    elinks.send(KEY_DOWN*14)
-    elinks.sendline('')
-
-    # Type query:
-
-    # # - author
-    # elinks.send('vandermeer')
-    # elinks.send(KEY_ESCAPE)
-
-    # - isbn
-    elinks.send(book['isbn'])
-    elinks.send(KEY_DOWN)
-    elinks.sendline('')
-    elinks.send(KEY_DOWN*2)
-    elinks.sendline('')
-
-
-    # Go to form submit.
-    # # - author
-    # elinks.send(KEY_DOWN*17)
-    # - isbn
-    elinks.send(KEY_DOWN*16)
-
-    # Send form.
-    elinks.sendline('')
-
-    # Accept form sending.
-    elinks.sendline('')
-
-    # Wait for results.
-    time.sleep(0.2)
-
-    # Dump results.
-    elinks.send(KEY_ESCAPE)
-    elinks.send(KEY_DOWN + 's')
-    elinks.send(KEY_BACKSPACE*54)
-    elinks.send(dump_file_name)
-    elinks.sendline('')
-
-    # Quit elinks.
-    elinks.sendline('q')
-    
+def browser_reload(browser):
+    print(u'Reloading search form.')
+    browser.get(OPAC_URL)
+    assert 'Opac' in browser.title
+    browser.find_element_by_id('form1:textField1').clear()
     return
 
-def extract_book_info_params(dump_file_name, book):
-    # Fetch results div from dumped file.
-    parser = None
-    with codecs.open(dump_file_name, 'r', 'utf-8') as file_handle:
-        parser = BeautifulSoup(
-            file_handle,
-            convertEntities=BeautifulSoup.HTML_ENTITIES
-        )
+def browser_stop(browser):
+    print('Stopping browser.')
+    browser.quit()
+    return
 
-    # Skip empty results.
-    results_div = parser.find('div', { 'class': 'hasla' })
-    if not results_div:
+def browser_timeout(browser):
+    print('Restarting browser.')
+
+    # Kill current browser instance.
+    # /F is to forcefully kill
+    # /T is to kill all child processes
+    taskkill = None
+    if browser.binary and browser.binary.process:
+        print(u'Killing firefox process "%s".' % browser.binary.process.pid)
+        taskkill = 'taskkill /PID %s /F /T' % browser.binary.process.pid
+    else:
+        print(u'Killing firefox process.')
+        taskkill = 'taskkill /IM firefox.exe /F /T'
+    os.system(taskkill)
+
+    # Remove temp folder.
+    if browser.profile and browser.profile.tempfolder:
+        print(u'Removing temporary profile.')
+        time.sleep(0.1)
+        shutil.rmtree(browser.profile.tempfolder)
+
+    # Remove object.
+    browser = None
+    return
+
+def browser_select_by_id_and_value(browser, select_id, select_value):
+    select = Select(browser.find_element_by_id(select_id))
+    select.select_by_value(select_value)
+    return select
+
+def browser_click(browser, elem):
+    webdriver.ActionChains(browser).move_to_element(elem) \
+                                   .click(elem) \
+                                   .perform()
+    return
+
+# Search type:
+# 1 - Author
+# 2 - Title
+# 3 - ISBN
+# 4 - Series
+
+# Resource type:
+# 1  - All
+# 2  - Book
+# 9  - Magazine
+# 15 - Audiobook
+def query_book_by_isbn(book):
+    return book['isbn'], '3', '2'
+def query_book_by_title(book):
+    return book['title'], '2', '2'
+
+def query_book(browser, book):
+
+    search_value, search_type, resource_type = None, None, None
+    if book['isbn']:
+        print(u'Querying book by isbn "%s" .' % book['isbn'])
+        search_value, search_type, resource_type = query_book_by_isbn(book)
+    elif book['title']:
+        print(u'Querying book by title.')
+        search_value, search_type, resource_type = query_book_by_title(book)
+
+    # Input search value.
+    print(u'Inputing search value.')
+    browser.find_element_by_id('form1:textField1').send_keys(search_value)
+
+    # Set search type.
+    print(u'Setting search type.')
+    browser_select_by_id_and_value(browser, 'form1:dropdown1', search_type)
+
+    # Set resource_type.
+    print(u'Setting resource type.')
+    browser_select_by_id_and_value(browser, 'form1:dropdown4', resource_type)
+
+    # Submit form.
+    print(u'Submitting form.')
+    submit = browser.find_element_by_id('form1:btnSzukajIndeks')
+    browser_click(browser, submit)
+
+    # Wait for results to appear.
+    print(u'Waiting for results.')
+    results         = None
+    results_wrapper = browser.find_element_by_class_name('hasla')
+    if (results_wrapper):
+        results = results_wrapper.find_elements_by_tag_name('a')
+
+    # Return search results.
+    print(u'Returning search results.')
+    return results
+
+def get_matching_result(browser, book, results):
+    if not results:
+        print(u'No match found.')
         return
 
-    # Result entries will be matched by isbn value.
-    isbn = book['isbn'].replace('-', '')
+    match_field, replace_from = None, None
+    if book['isbn']:
+        match_field, replace_from = 'isbn', '-'
+    elif book['title']:
+        match_field, replace_from = 'title', ' '
 
-    # Hrefs to all books in results.
-    results_a  = results_div.findAll('a', { 'onclick': re.compile('return haslo') })
+    match_value = book[match_field].replace(replace_from, '')
+    print(u'Matching for value by field "%s".' % match_field)
 
-    # Extract params for GET book info request.
-    get_params = None
-    for a in results_a:
-        if a.string.lstrip().replace('-', '') == isbn:
-            onclick = a['onclick']
-            match   = re.findall("'[^']+'", onclick)
-            if match:
-                get_params = re.sub("'", '', match[1])
+    match = None
+    for elem in results:
+        if elem.text.lstrip().replace(replace_from, '') == match_value:
+            print(u'Found match.')
+            browser_click(browser, elem)
+            match = elem.find_element_by_xpath('..') \
+                        .find_element_by_class_name('zawartosc') \
+                        .find_element_by_tag_name('a')
             break
 
-    return get_params
+    if not match:
+        print(u'No match found.')
 
-def extract_book_info_from_response(response):
-    if not response:
+    return match
+
+def extract_book_info(browser, book, match):
+    if not (book and match):
         return
 
-    info_by_library = []
+    print(u'Redirecting to book info.')
+    browser_click(browser, match)
 
-    div = BeautifulSoup(
-        response,
-        convertEntities=BeautifulSoup.HTML_ENTITIES
-    ).find('div', { 'id': 'zasob' })
+    print(u'Fetching book infos.')
+    warnings = browser.find_element_by_id('zasob') \
+                      .find_elements_by_class_name('opis_uwaga')
+    infos = [ div.find_element_by_xpath('..') for div in warnings ]
 
-    # Fetch 'td' tags containing book info by child element.
-    warnings = div.findAll('div', { 'class': 'opis_uwaga' })
-    info_td  = [ div.parent for div in warnings ]
+    re_department   = re.compile('\([^\)]+\)')
+    re_address      = re.compile('\,[^\,]+\,')
 
     # Fetch department, address and availability info.
-    re_department = re.compile('\([^\)]+\)')
-    re_address    = re.compile('\,[^\,]+\,')
-    for td in info_td:
-        td_text = td.text
+    info_by_library = []
+    for i in range(len(infos)):
+        print(u'Fetching department, address and availability info %d.' % i)
+        info, warning = infos[i].text, warnings[i].text
 
         # Get department string.
-        department = re_department.search(td_text)
+        department = re_department.search(info)
         if department:
             department = department.group()
 
         # Get address string.
-        address = re_address.search(td_text)
+        address = re_address.search(info)
         if address:
             address = address.group().replace(',', '').lstrip()
 
         # Get availability info.
-        availability = td.find('div', { 'class': 'opis_uwaga' }).string
+        availability = warning
         if not availability:
             availability = u'Dostępna'
 
@@ -269,127 +214,71 @@ def extract_book_info_from_response(response):
             (department, address, availability)
         )
 
-    return info_by_library
+    return "\n".join(info_by_library)
 
-def fetch_book_info(book, info_params):
-    if not info_params:
-        return
+def get_book_info(browser, book):
+    # Query book and fetch results.
+    results = query_book(browser, book)
+    match   = get_matching_result(browser, book, results)
+    # info    = None
+    info    = extract_book_info(browser, book, match)
 
-    # Prepare urls.
-    form_url = '%sfaces/Szukaj.jsp' % OPAC_URL
-    info_url = '%sfaces/ax/haslo?idh=%s' % (OPAC_URL, info_params)
-
-    # Prepare request handler.
-    cookie_jar = cookielib.CookieJar()
-    opener     = urllib2.build_opener(
-        urllib2.HTTPCookieProcessor(cookie_jar),
-        # urllib2.HTTPHandler(debuglevel=1),
-    )
-
-    # Prepare request headers.
-    headers   = {
-        'Referer':    OPAC_URL,
-        'User-Agent': "Mozilla/5.0",
-    }
-    opener.addheaders = [(key, headers[key]) for key in headers.keys()];
-
-    # Request used to initialize cookie.
-    request  = urllib2.Request(OPAC_URL)
-    response = opener.open(request)
-
-    # Request used to fetch book info.
-    request         = urllib2.Request(info_url)
-    response_string = opener.open(request).read()
-
-    # Extract book url from response.
-    a = BeautifulSoup(
-        response_string,
-        convertEntities=BeautifulSoup.HTML_ENTITIES
-    ).find('a')
-    # Remove '/Opac4/' path entry before creating book url.
-    # book_url = '%s%s' % (OPAC_URL, re.sub('\/Opac4\/', '', a['href']))
-    book_url = '%s%s' % (OPAC_URL, a['href'].replace('/Opac4/', ''))
-
-    request           = urllib2.Request(book_url)
-    response_string   = opener.open(request).read()
-
-    info_by_library = extract_book_info_from_response(response_string)
-
+    print(u'Done fetching info.')
     return {
         'author': book['author'],
-        'title' : book['title'],
-        'info'  : info_by_library,
+        'title' : '"%s"' % book['title'],
+        'info'  : info if info else "Brak",
     }
 
-def buu():
-    import re
-    import codecs
-    import urllib2
-    import cookielib
-    from BeautifulSoup import BeautifulSoup
-    from imogeen import get_file_path
+def get_library_status(books_list):
+    if not books_list:
+        return
 
-    file_path = get_file_path('wynik.html')
+    # Get browser.
+    browser = browser_start()
 
-    parser = None
-    with codecs.open(file_path, 'r', 'utf-8') as file_handle:
-        parser = BeautifulSoup(
-            file_handle,
-            convertEntities=BeautifulSoup.HTML_ENTITIES
-        )
+    # Will contains books info.
+    books_info = []
 
-    results_div = parser.find('div', { 'class': 'hasla' })
+    for book in books_list:
+        book_info = None
 
-    if not results_div:
-        raise "Buuuu!!"
+        # Retry when fetching book info (usually triggered by browser hang).
+        retry = 2
+        while not book_info and retry:
+            # Set timeout for request.
+            socket.setdefaulttimeout(SOCKET_TIMEOUT)
 
-    results_a   = results_div.findAll('a', { 'onclick': re.compile('return haslo') })
+            # Try fetching book info.
+            try:
+                # Reload opac site.
+                browser_reload(browser)
 
-    isbn = '9788375152937'
-    isbn_split = ('%s-%s-%s-%s-%s') % (isbn[:3], isbn[3:5], isbn[5:9], isbn[9:12], isbn[12])
+                # Fetch book info.
+                book_info = get_book_info(browser, book)
+            except socket.timeout:
+                print(u'Querying book info timed out.')
+                # Restart browser.
+                browser_timeout(browser)
+                browser = browser_start()
+            else:
+                print(u'Succsessfully queried book info.')
+            finally:
+                # Restore default timeout value.
+                socket.setdefaulttimeout(None)
 
-    get_params = None
-    for a in results_a:
-        if a.string.lstrip() == isbn_split:
-            onclick = a['onclick']
-            match = re.findall("'[^']+'", onclick)
-            if match:
-                get_params = re.sub("'", '', match[1])
-            break
+            # Append book info if present.
+            if book_info:
+                books_info.append(book_info)
+            else:
+                # Retry?
+                retry -= 1
+                if retry:
+                    print(u'Retrying ...')
 
-    if get_params:
-        host_ip   = '212.244.68.155'
-        opac_link = 'http://%s/Opac4/' % host_ip
-        form_link = '%sfaces/Szukaj.jsp' % opac_link
-        info_link = '%sfaces/ax/haslo?idh=%s' % (opac_link, get_params)
+    browser_stop(browser)
 
-        cookie_jar = cookielib.CookieJar()
-        opener     = urllib2.build_opener(
-            urllib2.HTTPCookieProcessor(cookie_jar),
-            # urllib2.HTTPHandler(debuglevel=1),
-        )
-
-        headers   = {
-            # 'Host':       host_ip,
-            'Referer':    opac_link,
-            'User-Agent': "Mozilla/5.0",
-        }
-
-        opener.addheaders = [(key, headers[key]) for key in headers.keys()];
-        request           = urllib2.Request(opac_link)
-        response          = opener.open(request)
-
-        request           = urllib2.Request(info_link)
-        response_string   = opener.open(request).read()
-
-        a = BeautifulSoup(
-            response_string,
-            convertEntities=BeautifulSoup.HTML_ENTITIES
-        ).find('a')
-        book_link = 'http://%s/%s' % (host_ip, a['href'])
-
-        request           = urllib2.Request(book_link)
-        response_string   = opener.open(request).read()
+    return books_info
 
 def get_books_list(file_name):
 
@@ -401,104 +290,46 @@ def get_books_list(file_name):
 
     return books_list
 
-def book_dispatcher(book, lock, books_info):
-    # Skip empty entries.
-    if not book:
-        return books_info
+def write_books(client, dst_cells, library_status):
+    # Prepare request that will be used to update worksheet cells.
+    batch_request = gdata.spreadsheet.SpreadsheetsCellsFeed()
 
-    with lock:
-        # Print info.
-        print(
-            "\tProcessing book '%s - %s'." %
-            (book['author'], book['title'])
+    cell_index = 0
+    for book_status in library_status:
+        for key in ('author', 'title', 'info'):
+            # Fetch next cell.
+            text_cell = dst_cells.entry[cell_index]
+
+            # Update cell value.
+            text_cell.cell.inputValue = book_status[key]
+            batch_request.AddUpdate(text_cell)
+
+            # Go to next cell.
+            cell_index += 1
+
+    # Execute batch update of destination cells.
+    return client.ExecuteBatch(
+        batch_request, dst_cells.GetBatchLink().href
+    )
+
+def get_books_source(options):
+    books_source = options.source
+    if options.refresh:
+        books_source            = '%s_%s.json' % (
+            REFRESH_SCRIPT, SHELF_NAME
         )
+    return books_source
 
-        # Search by title - author is not supported yet.
-        if not book['isbn']:
-            print(
-                "\tSkipping book '%s - %s' - no isbn." %
-                (book['author'], book['title'])
-            )
-            return
-
-    # Retry operation 5 times before giving up.
-    retry = 5
-    while retry:
-        # Get dump file name for current book.
-        dump_file_name = '%s.html' % book['isbn']
-
-        # Search and dump results file.
-        with lock:
-            print("\t\tQuerying OPAC server.")
-        query_and_dump_results(book, dump_file_name)
-
-        # Extract info url from dump.
-        with lock:
-            print("\t\tFetching book link.")
-        info_params = extract_book_info_params(dump_file_name, book)
-
-        # Remove dump file.
-        os.remove(dump_file_name)
-
-        # Retry fetching info?
-        if info_params:
-            with lock:
-                print("\t\tBook link fetched.")
-            retry = 0
-        else:
-            retry = retry - 1
-            with lock:
-                print("\t\tRetrying ...")
-
-    # Fetch book info.
-    with lock:
-        print("\t\tFetching book info.")
-    book_info = fetch_book_info(book, info_params)
-
-    if book_info:
-        with lock:
-            print("\t\tWriting book info.")
-            books_info.append(book_info)
-    else:
-        with lock:
-            print("\t\tBook info not found.")
-
-    return books_info
-
-def get_library_status(books_list):
-    if not books_list:
-        return
-
-    # Will contains books info.
-    books_info = []
-
-    # Lock for writing book info.
-    lock = threading.Lock()
-
-    # Process books in groups of 10.
-    books_count = len(books_list)
-    books_step  = 1
-
-    # Create treads per group.
-    for i in range(books_count)[::books_step]:
-        j = get_step_end_index(books_count, books_step, i)
-
-        # Start a new thead for each book.
-        book_threads = [
-            threading.Thread(
-                target=book_dispatcher,
-                args=(book, lock, books_info)
-            )
-            for book in books_list[i:j]
-        ]
-
-        # Wait for threads to finish.
-        for thread in book_threads:
-            thread.start()
-        for thread in book_threads:
-            thread.join()
-
-    return books_info
+def refresh_books_list(books_source):
+    print(u'Updating list of books to hunt.')
+    script_file = './%s.py' % REFRESH_SCRIPT
+    return subprocess.call([
+        sys.executable,
+        '-tt',
+        script_file,
+        '-s',
+        SHELF_NAME
+    ])
 
 def main():
     # Cmd options parser
@@ -507,30 +338,57 @@ def main():
     # Add options
     option_parser.add_option("-r", "--refresh", action="store_true")
     option_parser.add_option("-s", "--source")
+    option_parser.add_option("-a", "--auth-data")
 
     (options, args) = option_parser.parse_args()
 
-    if not options.source:
+    if (
+        not options.auth_data or
+        not (options.source or options.refresh)
+    ):
         # Display help.
         option_parser.print_help()
     else:
-        # Update books to read list.
-        if options.refresh:
-            print('Updating list of books to read.')
-            subprocess.call([sys.executable, '-tt', './imogeen.py', '-t'])
+        books_source = get_books_source(options)
 
-        # Read in book to read.
-        print('Reading in books list.')
-        books_list = get_books_list(options.source)
+        if options.refresh:
+            refresh_books_list(books_source)
+
+        # Read in books list.
+        print(u'Reading in books list.')
+        books_list = get_books_list(books_source)
 
         # Fetch books library status.
-        print('Fetching books library status.')
+        print(u'Fetching books library status.')
         library_status = get_library_status(books_list)
 
-        dump_books_list(library_status, 'opac.json')
+        # dump_books_list(library_status, 'opac.json')
+        # library_status = get_books_list('opac.json')
 
-    # pex()
-    # buu()
+        # Read auth data from input file.
+        print(u'Fetching auth data.')
+        auth_data = get_auth_data(options.auth_data)
+
+        # Connect to spreadsheet service.
+        print(u'Authenticating to Google service.')
+        client = connect_to_service(auth_data)
+
+        dst_worksheet_name = SHELF_NAME.capitalize()
+        print("Fetching destination worksheet '%s'." % dst_worksheet_name)
+        dst_worksheet      = get_writable_worksheet(
+            client, dst_worksheet_name, len(library_status)
+        )
+
+        print("Fetching destination cells.")
+        writable_cells = get_writable_cells(
+            client,
+            dst_worksheet,
+            len(library_status),
+            max_col=3
+        )
+
+        print("Writing books.")
+        write_books(client, writable_cells, library_status)
 
 if __name__ == "__main__":
     main()

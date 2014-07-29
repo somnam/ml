@@ -6,3 +6,5 @@
 *.json
 *.xls
 *.cache
+
+firefox.selenium
