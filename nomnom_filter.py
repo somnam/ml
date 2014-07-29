@@ -57,8 +57,8 @@ def retrieve_recipe_cells(client):
     work_feed       = client.GetWorksheetsFeed(spreadsheet_id)
 
     recipe_cells    = []
-    # Skip first worksheet, it doesn't contain recipes.
-    for worksheet in work_feed.entry[1:]:
+    # Skip first two worksheets, they don't contain recipes.
+    for worksheet in work_feed.entry[2:]:
         # Fetch worksheet cells.
         print("\tFetching worksheet '%s'." % worksheet.title.text)
         worksheet_id = worksheet.id.text.rsplit('/', 1)[-1]
@@ -123,13 +123,13 @@ def filter_nomnoms(row, lock, filtered_recipes, contains_re, filter_re):
 
     return
 
-# Invalidate values after 7 days.
-@filecache(7 * 24 * 60 * 60)
+# Invalidate values after 30 days.
+@filecache(30 * 24 * 60 * 60)
 def get_nomnom_page(recipe_url):
     # Get BeautifulSoup page instance.
     parser = get_parsed_url_response(recipe_url)
 
-    if parser:
+    if parser and parser.find('body'):
         # Don't search in header.
         parser = parser.find('body')
 
@@ -280,15 +280,12 @@ def decode_options(options):
 
     return
 
-def get_writable_cells(client, dst_worksheet, entries):
-
-    # TODO: extend worksheet rows count to fit found hits.
-    entries_len = len(entries)
+def get_writable_cells(client, dst_worksheet, entries_len, max_col=2):
 
     cell_query = gdata.spreadsheet.service.CellQuery()
     cell_query.return_empty = 'true'
     cell_query.max_row = '%d' % entries_len
-    cell_query.max_col = '2'
+    cell_query.max_col = '%d' % max_col
 
     return client.GetCellsFeed(
         key=retrieve_spreadsheet_id(client),
@@ -363,7 +360,7 @@ def main():
 
             print("Fetching destination cells.")
             dst_cells = get_writable_cells(
-                client, dst_worksheet, filtered_recipes
+                client, dst_worksheet, len(filtered_recipes)
             )
 
             print("Writing filtered recipes.")

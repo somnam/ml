@@ -96,7 +96,7 @@ def main(file_name):
         writable_cells = get_writable_cells(
             client,
             dst_worksheet,
-            recipes
+            len(recipes)
         )
 
         print("Writing recipes.")

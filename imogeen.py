@@ -29,7 +29,11 @@ def get_url_response(url):
         response = urllib2.urlopen(request)
         if response.getcode() != 200:
             response = None
-    except (httplib.BadStatusLine, urllib2.HTTPError):
+    except (
+        httplib.BadStatusLine,
+        urllib2.HTTPError,
+        urllib2.URLError
+    ):
         print "\tCould not fetch url '%s'." % url
 
     return response
@@ -43,10 +47,13 @@ def get_parsed_url_response(url):
     # Parse html response (if available)
     parser = None
     if response:
-        parser = BeautifulSoup(
-            response,
-            convertEntities=BeautifulSoup.HTML_ENTITIES
-        )
+        try:
+            parser = BeautifulSoup(
+                response,
+                convertEntities=BeautifulSoup.HTML_ENTITIES
+            )
+        except TypeError:
+            print(u'Error fetching response for url "%s".' % url)
 
     return parser
 
@@ -121,8 +128,8 @@ def get_books_on_page(pager_page):
 
     return books
 
-# Invalidate values after 7 days.
-@filecache(7 * 24 * 60 * 60)
+# Invalidate values after 30 days.
+@filecache(30 * 24 * 60 * 60)
 def get_book_info(book_url):
     """Get all kinds of info on book."""
     
