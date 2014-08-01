@@ -57,8 +57,7 @@ def retrieve_recipe_cells(client):
     work_feed       = client.GetWorksheetsFeed(spreadsheet_id)
 
     recipe_cells    = []
-    # Skip first two worksheets, they don't contain recipes.
-    for worksheet in work_feed.entry[2:]:
+    for worksheet in work_feed.entry:
         # Fetch worksheet cells.
         print("\tFetching worksheet '%s'." % worksheet.title.text)
         worksheet_id = worksheet.id.text.rsplit('/', 1)[-1]

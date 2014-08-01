@@ -9,8 +9,11 @@ import codecs
 import socket
 import shutil
 import subprocess
+import cookielib
+import urllib2
 import gdata.spreadsheet.service
 from optparse import OptionParser
+from BeautifulSoup import BeautifulSoup
 from selenium import webdriver
 from selenium.webdriver.support.ui import Select
 from selenium.webdriver.support.ui import WebDriverWait
@@ -42,10 +45,14 @@ def browser_start():
     browser.implicitly_wait(1)
     return browser
 
-def browser_reload(browser):
-    print(u'Reloading search form.')
+def browser_load_opac(browser):
+    print(u'Loading search form.')
     browser.get(OPAC_URL)
     assert 'Opac' in browser.title
+    return
+
+def browser_reload_opac(browser):
+    print(u'Reloading search form.')
     browser.find_element_by_id('form1:textField1').clear()
     return
 
@@ -89,6 +96,34 @@ def browser_click(browser, elem):
                                    .click(elem) \
                                    .perform()
     return
+
+def prepare_opener():
+    # Prepare request handler.
+    cookie_jar = cookielib.CookieJar()
+    opener     = urllib2.build_opener(
+        urllib2.HTTPCookieProcessor(cookie_jar),
+        # urllib2.HTTPHandler(debuglevel=1),
+    )
+
+    # Prepare request headers.
+    headers   = {
+        'Referer':    OPAC_URL,
+        'User-Agent': "Mozilla/5.0",
+    }
+    opener.addheaders = [(key, headers[key]) for key in headers.keys()]
+
+    # Request used to initialize cookie.
+    request = urllib2.Request(OPAC_URL)
+    opener.open(request)
+
+    return opener
+
+# 'opener' will be created only once.
+def get_url_response(url, opener = prepare_opener()):
+    response = None
+    if url:
+        response = opener.open(urllib2.Request(url)).read()
+    return response
 
 # Search type:
 # 1 - Author
@@ -178,12 +213,16 @@ def extract_book_info(browser, book, match):
         return
 
     print(u'Redirecting to book info.')
-    browser_click(browser, match)
+    book_url = match.get_attribute('href')
+    response = get_url_response(book_url)
 
     print(u'Fetching book infos.')
-    warnings = browser.find_element_by_id('zasob') \
-                      .find_elements_by_class_name('opis_uwaga')
-    infos = [ div.find_element_by_xpath('..') for div in warnings ]
+    div = BeautifulSoup(
+        response,
+        convertEntities=BeautifulSoup.HTML_ENTITIES
+    ).find('div', { 'id': 'zasob' })
+    warnings = div.findAll('div', { 'class': 'opis_uwaga' })
+    infos    = [ div.parent for div in warnings ]
 
     re_department   = re.compile('\([^\)]+\)')
     re_address      = re.compile('\,[^\,]+\,')
@@ -220,7 +259,6 @@ def get_book_info(browser, book):
     # Query book and fetch results.
     results = query_book(browser, book)
     match   = get_matching_result(browser, book, results)
-    # info    = None
     info    = extract_book_info(browser, book, match)
 
     print(u'Done fetching info.')
@@ -237,13 +275,17 @@ def get_library_status(books_list):
     # Get browser.
     browser = browser_start()
 
+    # Load opac site.
+    browser_load_opac(browser)
+
     # Will contains books info.
     books_info = []
 
     for book in books_list:
         book_info = None
 
-        # Retry when fetching book info (usually triggered by browser hang).
+        # Retry when fetching book info
+        # (usually triggered by browser hang).
         retry = 2
         while not book_info and retry:
             # Set timeout for request.
@@ -252,7 +294,7 @@ def get_library_status(books_list):
             # Try fetching book info.
             try:
                 # Reload opac site.
-                browser_reload(browser)
+                browser_reload_opac(browser)
 
                 # Fetch book info.
                 book_info = get_book_info(browser, book)
@@ -261,6 +303,7 @@ def get_library_status(books_list):
                 # Restart browser.
                 browser_timeout(browser)
                 browser = browser_start()
+                browser_load_opac(browser)
             else:
                 print(u'Succsessfully queried book info.')
             finally:

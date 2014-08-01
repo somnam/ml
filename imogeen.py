@@ -6,7 +6,6 @@ import os
 import json
 import time
 import re
-import gc
 import httplib
 import urllib2
 import codecs
@@ -217,8 +216,6 @@ def collect_shelf_books(pager_count, pager_url_base):
                 thread.start()
             for thread in book_threads:
                 thread.join()
-
-            gc.collect()
 
     return shelf_books
 
