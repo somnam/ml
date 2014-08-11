@@ -104,12 +104,11 @@ def filter_nomnoms(row, lock, filtered_recipes, contains_re, filter_re):
         with lock:
             print("\tProcessing url '%s'." % recipe_url_value)
 
-        # Fetch parsed recipe page.
-        recipe_page = get_nomnom_page(recipe_url_value)
-        if recipe_page:
-            # Check page content with given filters.
-            if filter_recipe(recipe_page, contains_re, filter_re):
-                filtered_recipe = True
+        filtered_recipe = filter_nomnom_page(
+            recipe_url_value,
+            contains_re,
+            filter_re
+        )
     # No url given - treat cell content as recipe.
     else:
         if filter_recipe(recipe_cell, contains_re, filter_re):
@@ -122,6 +121,20 @@ def filter_nomnoms(row, lock, filtered_recipes, contains_re, filter_re):
 
     return
 
+def filter_nomnom_page(recipe_url_value, contains_re, filter_re):
+    """ Check if current recipe url matches given filters."""
+
+    filtered_recipe = False
+
+    # Fetch parsed recipe page.
+    recipe_page = get_nomnom_page(recipe_url_value)
+    if recipe_page:
+        # Check page content with given filters.
+        if filter_recipe(recipe_page, contains_re, filter_re):
+            filtered_recipe = True
+
+    return filtered_recipe
+
 # Invalidate values after 30 days.
 @filecache(30 * 24 * 60 * 60)
 def get_nomnom_page(recipe_url):
@@ -131,6 +144,9 @@ def get_nomnom_page(recipe_url):
     if parser and parser.find('body'):
         # Don't search in header.
         parser = parser.find('body')
+
+        # Remove <script> tags from page.
+        [script.extract() for script in parser.findAll('script')]
 
         # Remove <a> tags from page.
         [a.extract() for a in parser.findAll('a')]
@@ -161,13 +177,15 @@ def get_nomnom_page(recipe_url):
 
 def filter_recipe(recipe_page, contains_re, filter_re):
     return (
-        (contains_re and contains_re.search(recipe_page)) or
-        (filter_re and not filter_re.search(recipe_page))
+        (contains_re and re.search(contains_re, recipe_page, re.UNICODE)) or
+        (filter_re and not re.search(filter_re, recipe_page, re.UNICODE))
     )
 
 def get_step_end_index(rows_len, step, i):
-    # return (i+step-1) if (i+step-1) < rows_len else rows_len-1
     return (i+step) if (i+step) < rows_len else rows_len
+
+def build_and_regex(option):
+    return ''.join('(?=.*%s)' % opt for opt in re.split(',', option))
 
 def filter_recipe_cells(recipe_cells, options):
     if not recipe_cells:
@@ -176,18 +194,15 @@ def filter_recipe_cells(recipe_cells, options):
     # Will contain filtered results.
     filtered_recipes = {}
 
-    # Values for 'contains' and 'filter' options are joined by a comma.
-    joiner = re.compile('\s*,\s*')
-
     # Build regexp for required phrases.
     contains_re = None
     if options.contains:
-        contains_re = re.compile(joiner.sub('|', options.contains), re.UNICODE)
+        contains_re = build_and_regex(options.contains)
 
     # Build regexp for phrases to be filtered out.
     filter_re = None
     if options.filter:
-        filter_re = re.compile(joiner.sub('|', options.filter), re.UNICODE)
+        filter_re = build_and_regex(options.filter)
 
     # Lock for appending row to list.
     lock = threading.Lock()
@@ -358,11 +373,12 @@ def main():
             )
 
             print("Fetching destination cells.")
+            filtered_recipes_len = len(filtered_recipes)
             dst_cells = get_writable_cells(
-                client, dst_worksheet, len(filtered_recipes)
+                client, dst_worksheet, filtered_recipes_len
             )
 
-            print("Writing filtered recipes.")
+            print("Writing filtered %d recipes." % filtered_recipes_len)
             write_recipes(client, dst_cells, filtered_recipes)
         else:
             print("No recipes found :(.")

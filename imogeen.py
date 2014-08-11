@@ -3,17 +3,20 @@
 
 # Import {{{
 import os
+import re
+import sys
 import json
 import time
-import re
 import httplib
 import urllib2
 import codecs
+import locale
 import threading
+from multiprocessing.dummy import Pool
 from filecache import filecache
 from BeautifulSoup import BeautifulSoup
-# from operator import itemgetter
 from optparse import OptionParser
+from datetime import datetime
 # }}}
 
 def get_url_response(url):
@@ -33,7 +36,7 @@ def get_url_response(url):
         urllib2.HTTPError,
         urllib2.URLError
     ):
-        print "\tCould not fetch url '%s'." % url
+        print "Could not fetch url '%s'." % url
 
     return response
 
@@ -89,11 +92,8 @@ def get_pager_info(shelf_page):
 
     pager_info = None
     if shelf_page:
-        # Look for pager tag
-        pager_tag = shelf_page.find('table', { 'class': 'pager-default' })
-
         # Get last pager entry.
-        pager_cell      = pager_tag.find('td', { 'class': 'centered' })
+        pager_cell      = shelf_page.find('td', { 'class': 'centered' })
         pager_tags      = pager_cell.findAll('a')
         last_pager_tag  = pager_tags.pop()
 
@@ -105,7 +105,6 @@ def get_pager_info(shelf_page):
             '\d+$',
             '',
             last_pager_tag['href']
-            # pager_count_tag.find('a')['href']
         )
 
         pager_info = pager_count, pager_url_base
@@ -117,11 +116,8 @@ def get_books_on_page(pager_page):
     
     books = None
     if pager_page:
-        books = pager_page.find(
-            'ul', 
-            { 'class' : 'books-list' }
-        ).findAll(
-            'a', 
+        books = pager_page.findAll(
+            'a',
             { 'class' : 'bookTitle' }
         )
 
@@ -139,7 +135,7 @@ def get_book_info(book_url):
 
         # Get book title and author from breadcrumbs.
         breadcrumbs = book_page.find(
-            'ul', 
+            'ul',
             { 'class': 'breadcrumb' }
         ).findAll('li')
         book_title  = breadcrumbs.pop()
@@ -175,47 +171,49 @@ def get_book_info(book_url):
 
     return book_info
 
-def fetch_shelf_book(counter, book, shelf_books, lock):
-    book_url  = book['href']
-    book_info = get_book_info(book_url)
-
-    with lock:
-        if book_info:
-            print("\t\tFetched book %d" % (counter+1))
-            shelf_books.append(book_info)
-
-    return
-
 def collect_shelf_books(pager_count, pager_url_base):
     shelf_books = []
     if pager_count and pager_url_base:
+        # Assume 10 books per page.
+        workers_count = 10
+        pool          = Pool(workers_count)
 
-        # Lock for writing book info in shelf_books
-        lock = threading.Lock()
+        print("Fetching %d shelf pages..." % pager_count)
+        shelf_pages = pool.map(
+            get_parsed_url_response,
+            (
+                '%s%d' % (pager_url_base, index)
+                for index in range(1, (pager_count+1))
+            )
+        )
+        print("Pages fetched.")
 
-        for index in range(1, (pager_count+1)):
-            print("\tFetching page %d" % index)
+        print("Fetching approximately %d book urls..." % (
+            len(shelf_pages)*workers_count
+        ))
+        books_per_page = pool.map(
+            get_books_on_page,
+            shelf_pages
+        )
+        book_urls = [
+            book['href']
+            for books in books_per_page
+            for book in books
+        ]
+        print("Fetched %d book urls." % len(book_urls))
 
-            pager_url   = '%s%d' % (pager_url_base, index)
-            pager_page  = get_parsed_url_response(pager_url)
+        print("Fetching %d books info..." % len(book_urls))
+        shelf_books = pool.map(
+            get_book_info,
+            book_urls
+        )
+        print("Fetched %d books." % len(shelf_books))
 
-            # Get list of all books on current page
-            books = get_books_on_page(pager_page)
+        # No new jobs can be added to pool.
+        pool.close()
 
-            # Start a new thread for each book to fetch
-            book_threads = [
-                threading.Thread(
-                    target=fetch_shelf_book,
-                    args=(counter, book, shelf_books, lock)
-                )
-                for counter,book in enumerate(books[1:])
-            ]
-
-            # Wait for threads to finish
-            for thread in book_threads:
-                thread.start()
-            for thread in book_threads:
-                thread.join()
+        # Wait until all threads finish.
+        pool.join()
 
     return shelf_books
 
@@ -274,7 +272,13 @@ def get_file_path(file_name):
         file_name
     )
 
-if __name__ == "__main__":
+def fix_stdout_locale():
+    encoding   = 'utf-8'
+    sys.stdout = codecs.getwriter(encoding)(sys.stdout)
+    sys.stderr = codecs.getwriter(encoding)(sys.stderr)
+    return
+
+def main():
     # Cmd options parser
     option_parser = OptionParser()
 
@@ -298,8 +302,14 @@ if __name__ == "__main__":
         fetch_shelf_list(options.profile_id, 'chce-przeczytac')
     elif options.read:
         fetch_shelf_list(options.profile_id, 'przeczytane')
-    elif options.shelf:
-        fetch_shelf_list(options.profile_id, options.shelf)
     elif options.owned:
         # Scan owned list.
         fetch_shelf_list(options.profile_id, 'posiadam')
+    elif options.shelf:
+        fetch_shelf_list(options.profile_id, options.shelf)
+
+if __name__ == "__main__":
+    start_time = datetime.now()
+    main()
+    # print("Run time:")
+    # print(datetime.now() - start_time)

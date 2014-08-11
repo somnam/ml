@@ -7,7 +7,7 @@ import codecs
 import gdata.spreadsheet.service
 from optparse import OptionParser
 from BeautifulSoup import BeautifulSoup
-from imogeen import get_file_path
+from imogeen import get_file_path, fix_stdout_locale
 from nomnom_filter import (
     get_auth_data,
     connect_to_service,
@@ -64,6 +64,9 @@ def write_recipes(client, dst_cells, recipes):
     return client.ExecuteBatch(batch_request, dst_cells.GetBatchLink().href)
 
 def main(file_name):
+    # Fix stdout encoding.
+    fix_stdout_locale()
+
     # Cmd options parser
     option_parser = OptionParser()
     option_parser.add_option("-a", "--auth-data")
@@ -86,8 +89,8 @@ def main(file_name):
         print("Authenticating to Google service.")
         client = connect_to_service(auth_data)
 
-        dst_worksheet_name = u'Zakładki'
-        print("Fetching destination worksheet '%s'." % dst_worksheet_name)
+        dst_worksheet_name = u'bookmarks'
+        print(u"Fetching destination worksheet '%s'." % dst_worksheet_name)
         dst_worksheet      = get_writable_worksheet(
             client, dst_worksheet_name, len(recipes)
         )
