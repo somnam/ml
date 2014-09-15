@@ -11,8 +11,10 @@ from imogeen import get_file_path, fix_stdout_locale
 from nomnom_filter import (
     get_auth_data,
     connect_to_service,
+    retrieve_spreadsheet_id,
     get_writable_worksheet,
-    get_writable_cells
+    get_writable_cells,
+    SPREADSHEET_TITLE
 )
 # }}}
 
@@ -80,7 +82,8 @@ def main(file_name):
         parser  = get_bookmarks_parser(file_name)
 
         print("Fetching recipes from bookmarks.")
-        recipes = get_recipes(parser)
+        recipes     = get_recipes(parser)
+        recipes_len = len(recipes)
 
         # Read auth data from input file.
         auth_data = get_auth_data(options.auth_data)
@@ -89,17 +92,24 @@ def main(file_name):
         print("Authenticating to Google service.")
         client = connect_to_service(auth_data)
 
+        # Fetch spreadsheet id.
+        ssid = retrieve_spreadsheet_id(client, SPREADSHEET_TITLE)
+
         dst_worksheet_name = u'bookmarks'
         print(u"Fetching destination worksheet '%s'." % dst_worksheet_name)
         dst_worksheet      = get_writable_worksheet(
-            client, dst_worksheet_name, len(recipes)
+            client,
+            dst_worksheet_name,
+            ssid,
+            row_count=recipes_len,
         )
 
         print("Fetching destination cells.")
         writable_cells = get_writable_cells(
             client,
             dst_worksheet,
-            len(recipes)
+            ssid,
+            max_row=recipes_len
         )
 
         print("Writing recipes.")

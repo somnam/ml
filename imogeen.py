@@ -12,19 +12,19 @@ import urllib2
 import codecs
 import locale
 import threading
-from multiprocessing.dummy import Pool
+from multiprocessing.dummy import Pool, cpu_count
 from filecache import filecache
 from BeautifulSoup import BeautifulSoup
 from optparse import OptionParser
 from datetime import datetime
 # }}}
 
-def get_url_response(url):
+def get_url_response(url, data=None):
     """Send request to given url and ask for response."""
 
     # Send request to given url and fetch response
     headers     = { 'User-Agent' : 'Mozilla/5.0' }
-    request     = urllib2.Request(url, headers=headers)
+    request     = urllib2.Request(url, headers=headers, data=data)
 
     response = None
     try:
@@ -35,16 +35,16 @@ def get_url_response(url):
         httplib.BadStatusLine,
         urllib2.HTTPError,
         urllib2.URLError
-    ):
-        print "Could not fetch url '%s'." % url
+    ) as e:
+        print "Could not fetch url '%s'. Error: %s." % (url, e)
 
     return response
 
-def get_parsed_url_response(url):
+def get_parsed_url_response(url, data=None):
     """Send request to given url and return parsed HTML response."""
 
     # Fetch url response object
-    response = get_url_response(url)
+    response = get_url_response(url, data=data)
 
     # Parse html response (if available)
     parser = None
@@ -71,6 +71,7 @@ def get_library_url(profile_page):
         library_re       = re.compile('profil\/.*\/biblioteczka\/lista')
         library_url_base = profile_page.find('a', { 'href': library_re })
         library_url      = library_url_base['href']
+        profile_page.decompose()
 
     return library_url
 
@@ -84,6 +85,7 @@ def get_shelf_url(library_page, shelf):
             { 'href': to_read_re, 'class': to_read_class_re }
         )
         shelf_url      = get_site_url(shelf_url_base['href'])
+        library_page.decompose()
 
     return shelf_url
 
@@ -109,17 +111,22 @@ def get_pager_info(shelf_page):
 
         pager_info = pager_count, pager_url_base
 
+        shelf_page.decompose()
+
     return pager_info
 
-def get_books_on_page(pager_page):
+def get_books_on_page(pager_url):
     """Get list of books on current page."""
     
     books = None
-    if pager_page:
-        books = pager_page.findAll(
+    if pager_url:
+        pager_page = get_parsed_url_response(pager_url)
+        book_tags  = pager_page.findAll(
             'a',
             { 'class' : 'bookTitle' }
         )
+        books = [ book['href'] for book in book_tags ]
+        pager_page.decompose()
 
     return books
 
@@ -127,7 +134,7 @@ def get_books_on_page(pager_page):
 @filecache(30 * 24 * 60 * 60)
 def get_book_info(book_url):
     """Get all kinds of info on book."""
-    
+
     book_page = get_parsed_url_response(book_url)
 
     book_info = None
@@ -169,37 +176,41 @@ def get_book_info(book_url):
             'url'               : book_url,
         }
 
+        book_page.decompose()
+
     return book_info
 
 def collect_shelf_books(pager_count, pager_url_base):
     shelf_books = []
     if pager_count and pager_url_base:
-        # Assume 10 books per page.
-        workers_count = 10
+        # Create workers pool.
+        workers_count = cpu_count() * 2
         pool          = Pool(workers_count)
 
+        # Assume 10 books per page.
+        books_batch_count = 10
+
         print("Fetching %d shelf pages..." % pager_count)
-        shelf_pages = pool.map(
-            get_parsed_url_response,
-            (
-                '%s%d' % (pager_url_base, index)
-                for index in range(1, (pager_count+1))
-            )
-        )
-        print("Pages fetched.")
+        pager_urls = [
+            '%s%d' % (pager_url_base, index)
+            for index in range(1, (pager_count+1))
+        ]
 
         print("Fetching approximately %d book urls..." % (
-            len(shelf_pages)*workers_count
+            # Each page contains 10 books.
+            len(pager_urls)*books_batch_count
         ))
         books_per_page = pool.map(
             get_books_on_page,
-            shelf_pages
+            pager_urls
         )
+
         book_urls = [
-            book['href']
+            book
             for books in books_per_page
             for book in books
         ]
+
         print("Fetched %d book urls." % len(book_urls))
 
         print("Fetching %d books info..." % len(book_urls))
@@ -217,18 +228,25 @@ def collect_shelf_books(pager_count, pager_url_base):
 
     return shelf_books
 
+def dump_json_file(struct, file_name):
+    file_path = get_file_path(file_name)
+
+    # utf-8 chars should be displayed properly in results file:
+    # - codecs.open must be used instead of open, with 'utf-8' flag
+    file_handle = codecs.open(file_path, 'w+', 'utf-8')
+
+    # - json.dumps must have ensure_ascii set to False
+    json.dump(struct, file_handle, ensure_ascii=False, indent=2)
+
+    file_handle.close()
+
+    return
+
 def dump_books_list(shelf_books, file_name):
     if shelf_books:
         # Save sorted list to json
         print("Dumping results to file.")
-        file_path = get_file_path(file_name)
-
-        # utf-8 chars should be displayed properly in results file:
-        # - codecs.open must be used instead of open, with 'utf-8' flag
-        file_handle = codecs.open(file_path, 'w+', 'utf-8')
-        # - json.dumps must have ensure_ascii set to False
-        json.dump(shelf_books, file_handle, ensure_ascii=False, indent=2)
-        file_handle.close()
+        dump_json_file(shelf_books, file_name)
 
     return
 

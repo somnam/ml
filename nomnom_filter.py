@@ -16,16 +16,26 @@ from filecache import filecache
 from imogeen import get_parsed_url_response, get_file_path
 # }}}
 
+SPREADSHEET_TITLE = u'Lista'
+
 def get_auth_data(file_name):
 
-    file_path = get_file_path(file_name)
-
     auth_data = None
-    with codecs.open(file_path, 'r', 'utf-8') as file_handle:
-        file_data = json.load(file_handle)
+    file_data = get_json_file(file_name)
+    if file_data:
         auth_data = (file_data['login'], file_data['password'])
 
     return auth_data
+
+def get_json_file(file_name):
+
+    file_path = get_file_path(file_name)
+
+    file_data = None
+    with codecs.open(file_path, 'r', 'utf-8') as file_handle:
+        file_data = json.load(file_handle)
+
+    return file_data
 
 def connect_to_service(auth_data):
     if not auth_data:
@@ -53,8 +63,8 @@ def retrieve_recipe_cells(client):
     cell_query.max_col      = '2'
 
     # Get worksheet feed.
-    spreadsheet_id  = retrieve_spreadsheet_id(client)
-    work_feed       = client.GetWorksheetsFeed(spreadsheet_id)
+    spreadsheet_id    = retrieve_spreadsheet_id(client, SPREADSHEET_TITLE)
+    work_feed         = client.GetWorksheetsFeed(spreadsheet_id)
 
     recipe_cells    = []
     for worksheet in work_feed.entry:
@@ -71,14 +81,13 @@ def retrieve_recipe_cells(client):
 
     return recipe_cells
 
-def retrieve_spreadsheet_id(client):
+def retrieve_spreadsheet_id(client, title):
     if not client:
         return
 
-    query = gdata.spreadsheet.service.DocumentQuery()
-    query.title = 'Lista Kociołapnych'
-
-    sheet_feed = client.GetSpreadsheetsFeed(query=query)
+    query       = gdata.spreadsheet.service.DocumentQuery()
+    query.title = title
+    sheet_feed  = client.GetSpreadsheetsFeed(query=query)
 
     spreadsheet_id = None
     if sheet_feed.entry:
@@ -248,9 +257,7 @@ def get_worksheet_name(options):
 
     return worksheet_name
 
-def get_writable_worksheet(client, worksheet_name, row_count=100):
-    # Fetch spreadsheet id.
-    spreadsheet_id = retrieve_spreadsheet_id(client)
+def get_writable_worksheet(client, worksheet_name, spreadsheet_id, row_count=100):
 
     # Used for name comparison.
     stdin_enc = sys.stdin.encoding
@@ -294,15 +301,15 @@ def decode_options(options):
 
     return
 
-def get_writable_cells(client, dst_worksheet, entries_len, max_col=2):
+def get_writable_cells(client, dst_worksheet, spreadsheet_id, max_row=100, max_col=2):
 
     cell_query = gdata.spreadsheet.service.CellQuery()
     cell_query.return_empty = 'true'
-    cell_query.max_row = '%d' % entries_len
+    cell_query.max_row = '%d' % max_row
     cell_query.max_col = '%d' % max_col
 
     return client.GetCellsFeed(
-        key=retrieve_spreadsheet_id(client),
+        key=spreadsheet_id,
         wksht_id=dst_worksheet.id.text.rsplit('/', 1)[-1],
         query=cell_query
     )
@@ -365,17 +372,26 @@ def main():
 
         # Write recipes only when any were found.
         if filtered_recipes:
+            # Fetch spreadsheet id.
+            ssid = retrieve_spreadsheet_id(client, SPREADSHEET_TITLE)
+
             # Get worksheet for writing recipes.
             dst_worksheet_name = get_worksheet_name(options)
             print("Fetching destination worksheet '%s'." % dst_worksheet_name)
             dst_worksheet = get_writable_worksheet(
-                client, dst_worksheet_name
+                client,
+                dst_worksheet_name,
+                ssid,
+                row_count=filtered_recipes_len,
             )
 
             print("Fetching destination cells.")
             filtered_recipes_len = len(filtered_recipes)
             dst_cells = get_writable_cells(
-                client, dst_worksheet, filtered_recipes_len
+                client,
+                dst_worksheet,
+                ssid,
+                max_row=filtered_recipes_len,
             )
 
             print("Writing filtered %d recipes." % filtered_recipes_len)

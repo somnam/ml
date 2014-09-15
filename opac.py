@@ -24,6 +24,7 @@ from imogeen import get_file_path, dump_books_list
 from nomnom_filter import (
     get_auth_data,
     connect_to_service,
+    retrieve_spreadsheet_id,
     get_writable_worksheet,
     get_writable_cells
 )
@@ -32,15 +33,17 @@ from nomnom_filter import (
 OPAC_URL       = 'http://opac.ksiaznica.bielsko.pl/'
 SOCKET_TIMEOUT = 4.0
 REFRESH_SCRIPT = 'imogeen'
-SHELF_NAME     = 'polowanie'
+SHELF_NAME     = 'polowanie-biblioteczne'
 
 def browser_start():
     print(u'Starting browser.')
+
     # Set browser profile.
-    profile = webdriver.FirefoxProfile('./firefox.selenium')
+    # profile = webdriver.FirefoxProfile('./firefox.selenium')
+    # browser = webdriver.Firefox(firefox_profile=profile)
 
     # Load webdriver.
-    browser = webdriver.Firefox(firefox_profile=profile)
+    browser = webdriver.Firefox()
     # Some of sites elements are loaded via ajax - wait for them.
     browser.implicitly_wait(1)
     return browser
@@ -253,6 +256,8 @@ def extract_book_info(browser, book, match):
             (department, address, availability)
         )
 
+    div.decompose()
+
     return "\n".join(info_by_library)
 
 def get_book_info(browser, book):
@@ -355,23 +360,20 @@ def write_books(client, dst_cells, library_status):
         batch_request, dst_cells.GetBatchLink().href
     )
 
-def get_books_source(options):
-    books_source = options.source
-    if options.refresh:
-        books_source            = '%s_%s.json' % (
-            REFRESH_SCRIPT, SHELF_NAME
-        )
-    return books_source
+def get_books_source_file(source):
+    return source if re.match(r'^.*\.json$', source) else '%s_%s.json' % (
+        REFRESH_SCRIPT, source
+    )
 
-def refresh_books_list(books_source):
-    print(u'Updating list of books to hunt.')
+def refresh_books_list(source):
+    print(u'Updating list of books from source "%s".' % source)
     script_file = './%s.py' % REFRESH_SCRIPT
     return subprocess.call([
         sys.executable,
         '-tt',
         script_file,
         '-s',
-        SHELF_NAME
+        source
     ])
 
 def main():
@@ -385,25 +387,25 @@ def main():
 
     (options, args) = option_parser.parse_args()
 
-    if (
-        not options.auth_data or
-        not (options.source or options.refresh)
-    ):
+    if not options.auth_data:
         # Display help.
         option_parser.print_help()
     else:
-        books_source = get_books_source(options)
+        books_source = (options.source or SHELF_NAME)
 
         if options.refresh:
             refresh_books_list(books_source)
 
+        books_source_file = get_books_source_file(books_source)
+
         # Read in books list.
         print(u'Reading in books list.')
-        books_list = get_books_list(books_source)
+        books_list = get_books_list(books_source_file)
 
         # Fetch books library status.
         print(u'Fetching books library status.')
-        library_status = get_library_status(books_list)
+        library_status     = get_library_status(books_list)
+        status_entries_len = len(library_status)
 
         # dump_books_list(library_status, 'opac.json')
         # library_status = get_books_list('opac.json')
@@ -416,18 +418,26 @@ def main():
         print(u'Authenticating to Google service.')
         client = connect_to_service(auth_data)
 
+        # Fetch spreadsheet id.
+        spreadsheet_title = u'Karty'
+        ssid              = retrieve_spreadsheet_id(client, spreadsheet_title)
+
         dst_worksheet_name = SHELF_NAME.capitalize()
         print("Fetching destination worksheet '%s'." % dst_worksheet_name)
         dst_worksheet      = get_writable_worksheet(
-            client, dst_worksheet_name, len(library_status)
+            client,
+            dst_worksheet_name,
+            ssid,
+            row_count=status_entries_len,
         )
 
         print("Fetching destination cells.")
         writable_cells = get_writable_cells(
             client,
             dst_worksheet,
-            len(library_status),
-            max_col=3
+            ssid,
+            max_row=status_entries_len,
+            max_col=3,
         )
 
         print("Writing books.")
