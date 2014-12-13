@@ -78,13 +78,15 @@ def get_library_url(profile_page):
 def get_shelf_url(library_page, shelf):
     shelf_url = None
     if library_page:
-        to_read_re       = re.compile('%s\/lista' % shelf)
+        to_read_re       = re.compile('%s\/miniatury' % shelf)
         to_read_class_re = re.compile('shelf-name')
         shelf_url_base = library_page.find(
             'a',
             { 'href': to_read_re, 'class': to_read_class_re }
         )
-        shelf_url      = get_site_url(shelf_url_base['href'])
+        shelf_url      = get_site_url(shelf_url_base['href']).replace(
+            'miniatury', 'lista'
+        )
         library_page.decompose()
 
     return shelf_url
@@ -123,7 +125,7 @@ def get_books_on_page(pager_url):
         pager_page = get_parsed_url_response(pager_url)
         book_tags  = pager_page.findAll(
             'a',
-            { 'class' : 'bookTitle' }
+            { 'class' : 'withTipFixed' }
         )
         books = [ book['href'] for book in book_tags ]
         pager_page.decompose()
