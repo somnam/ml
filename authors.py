@@ -153,6 +153,7 @@ def main():
         option_parser.print_help()
     else:
         if options.refresh:
+            print(u'Updating list of books from source "%s".' % options.source)
             refresh_books_list(options.source)
 
         books_source = get_books_source(options.source)

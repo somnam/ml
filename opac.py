@@ -1,3 +1,4 @@
+#!/usr/bin/pyth n -tt
 # -*- coding: utf-8 -*-
 
 import os
@@ -31,9 +32,6 @@ from nomnom_filter import (
 
 # Lovely constants.
 OPAC_URL       = 'http://opac.ksiaznica.bielsko.pl/'
-SOCKET_TIMEOUT = 4.0
-REFRESH_SCRIPT = 'imogeen'
-SHELF_NAME     = 'polowanie-biblioteczne'
 
 def browser_start():
     print(u'Starting browser.')
@@ -133,37 +131,28 @@ def get_url_response(url, opener = prepare_opener()):
 # 2 - Title
 # 3 - ISBN
 # 4 - Series
-
 # Resource type:
 # 1  - All
 # 2  - Book
 # 9  - Magazine
 # 15 - Audiobook
-def query_book_by_isbn(book):
-    return book['isbn'], '3', '2'
-def query_book_by_title(book):
-    return book['title'], '2', '2'
+def query_book(browser, search_value, search_field):
 
-def query_book(browser, book):
-
-    search_value, search_type, resource_type = None, None, None
-    if book['isbn']:
-        print(u'Querying book by isbn "%s" .' % book['isbn'])
-        search_value, search_type, resource_type = query_book_by_isbn(book)
-    elif book['title']:
+    search_type, resource_type = None, None
+    if search_field == 'isbn':
+        print(u'Querying book by isbn "%s" .' % search_value)
+        search_type, resource_type = '3', '2'
+    elif search_field == 'title':
         print(u'Querying book by title.')
-        search_value, search_type, resource_type = query_book_by_title(book)
+        search_type, resource_type = '2', '2'
 
     # Input search value.
-    print(u'Inputing search value.')
     browser.find_element_by_id('form1:textField1').send_keys(search_value)
 
     # Set search type.
-    print(u'Setting search type.')
     browser_select_by_id_and_value(browser, 'form1:dropdown1', search_type)
 
     # Set resource_type.
-    print(u'Setting resource type.')
     browser_select_by_id_and_value(browser, 'form1:dropdown4', resource_type)
 
     # Submit form.
@@ -172,7 +161,6 @@ def query_book(browser, book):
     browser_click(browser, submit)
 
     # Wait for results to appear.
-    print(u'Waiting for results.')
     results         = None
     results_wrapper = browser.find_element_by_class_name('hasla')
     if (results_wrapper):
@@ -182,19 +170,14 @@ def query_book(browser, book):
     print(u'Returning search results.')
     return results
 
-def get_matching_result(browser, book, results):
+def get_matching_result(browser, search_value, search_field, results):
     if not results:
         print(u'No match found.')
         return
 
-    match_field, replace_from = None, None
-    if book['isbn']:
-        match_field, replace_from = 'isbn', '-'
-    elif book['title']:
-        match_field, replace_from = 'title', ' '
-
-    match_value = book[match_field].replace(replace_from, '')
-    print(u'Matching for value by field "%s".' % match_field)
+    replace_from = '-' if search_field == 'isbn' else ' '
+    match_value  = search_value.replace(replace_from, '')
+    print(u'Matching for value by field "%s".' % search_field)
 
     match = None
     for elem in results:
@@ -260,18 +243,32 @@ def extract_book_info(browser, book, match):
 
     return "\n".join(info_by_library)
 
-def get_book_info(browser, book):
+def get_book_info(browser, book, search_field):
+    if not(
+        book.has_key(search_field) and
+        book[search_field]
+    ):
+        return
+
     # Query book and fetch results.
-    results = query_book(browser, book)
-    match   = get_matching_result(browser, book, results)
+    results = query_book(browser, book[search_field], search_field)
+    match   = get_matching_result(
+        browser, book[search_field], search_field, results
+    )
     info    = extract_book_info(browser, book, match)
 
-    print(u'Done fetching info.')
-    return {
-        'author': book['author'],
-        'title' : '"%s"' % book['title'],
-        'info'  : info if info else "Brak",
-    }
+    result = None
+    if info:
+        print(u'Book info found.')
+        result = {
+            'author': book['author'],
+            'title' : '"%s"' % book['title'],
+            'info'  : info if info else "Brak",
+        }
+    else:
+        print(u'Failed fetching book info.')
+
+    return result
 
 def get_library_status(books_list):
     if not books_list:
@@ -286,6 +283,9 @@ def get_library_status(books_list):
     # Will contains books info.
     books_info = []
 
+    # Default value for request timeout.
+    socket_timeout = 4.0
+
     for book in books_list:
         book_info = None
 
@@ -294,7 +294,10 @@ def get_library_status(books_list):
         retry = 2
         while not book_info and retry:
             # Set timeout for request.
-            socket.setdefaulttimeout(SOCKET_TIMEOUT)
+            socket.setdefaulttimeout(socket_timeout)
+
+            # Search first by isbn, then by title.
+            search_field = 'title' if retry % 2 else 'isbn'
 
             # Try fetching book info.
             try:
@@ -302,21 +305,20 @@ def get_library_status(books_list):
                 browser_reload_opac(browser)
 
                 # Fetch book info.
-                book_info = get_book_info(browser, book)
+                book_info = get_book_info(browser, book, search_field)
             except socket.timeout:
                 print(u'Querying book info timed out.')
                 # Restart browser.
                 browser_timeout(browser)
                 browser = browser_start()
                 browser_load_opac(browser)
-            else:
-                print(u'Succsessfully queried book info.')
             finally:
                 # Restore default timeout value.
                 socket.setdefaulttimeout(None)
 
             # Append book info if present.
             if book_info:
+                print(u'Succsessfully queried book info.')
                 books_info.append(book_info)
             else:
                 # Retry?
@@ -361,13 +363,12 @@ def write_books(client, dst_cells, library_status):
     )
 
 def get_books_source_file(source):
-    return source if re.match(r'^.*\.json$', source) else '%s_%s.json' % (
-        REFRESH_SCRIPT, source
+    return source if re.match(r'^.*\.json$', source) else 'imogeen_%s.json' % (
+        source
     )
 
 def refresh_books_list(source):
-    print(u'Updating list of books from source "%s".' % source)
-    script_file = './%s.py' % REFRESH_SCRIPT
+    script_file = './imogeen.py'
     return subprocess.call([
         sys.executable,
         '-tt',
@@ -391,9 +392,11 @@ def main():
         # Display help.
         option_parser.print_help()
     else:
-        books_source = (options.source or SHELF_NAME)
+        shelf_name   = 'polowanie-biblioteczne'
+        books_source = (options.source or shelf_name)
 
         if options.refresh:
+            print(u'Updating list of books from source "%s".' % books_source)
             refresh_books_list(books_source)
 
         books_source_file = get_books_source_file(books_source)
@@ -422,7 +425,7 @@ def main():
         spreadsheet_title = u'Karty'
         ssid              = retrieve_spreadsheet_id(client, spreadsheet_title)
 
-        dst_worksheet_name = SHELF_NAME.capitalize()
+        dst_worksheet_name = shelf_name.capitalize()
         print("Fetching destination worksheet '%s'." % dst_worksheet_name)
         dst_worksheet      = get_writable_worksheet(
             client,
