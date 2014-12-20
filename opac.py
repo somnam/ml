@@ -21,7 +21,7 @@ from selenium.webdriver.support.ui import WebDriverWait
 from selenium.webdriver.support import expected_conditions
 from selenium.webdriver.common.by import By
 from selenium.webdriver.common.keys import Keys
-from imogeen import get_file_path, dump_books_list
+from imogeen import get_file_path, dump_books_list, prepare_opener
 from nomnom_filter import (
     get_auth_data,
     connect_to_service,
@@ -62,6 +62,7 @@ def browser_stop(browser):
     browser.quit()
     return
 
+# FIXME: use unix kill
 def browser_timeout(browser):
     print('Restarting browser.')
 
@@ -98,21 +99,8 @@ def browser_click(browser, elem):
                                    .perform()
     return
 
-def prepare_opener():
-    # Prepare request handler.
-    cookie_jar = cookielib.CookieJar()
-    opener     = urllib2.build_opener(
-        urllib2.HTTPCookieProcessor(cookie_jar),
-        # urllib2.HTTPHandler(debuglevel=1),
-    )
-
-    # Prepare request headers.
-    headers   = {
-        'Referer':    OPAC_URL,
-        'User-Agent': "Mozilla/5.0",
-    }
-    opener.addheaders = [(key, headers[key]) for key in headers.keys()]
-
+def prepare_opac_opener():
+    opener = prepare_opener(OPAC_URL)
     # Request used to initialize cookie.
     request = urllib2.Request(OPAC_URL)
     opener.open(request)
@@ -120,7 +108,7 @@ def prepare_opener():
     return opener
 
 # 'opener' will be created only once.
-def get_url_response(url, opener = prepare_opener()):
+def get_url_response(url, opener = prepare_opac_opener()):
     response = None
     if url:
         response = opener.open(urllib2.Request(url)).read()
@@ -325,6 +313,8 @@ def get_library_status(books_list):
                 retry -= 1
                 if retry:
                     print(u'Retrying ...')
+            # Sleep for short time to avoid too frequent requests.
+            time.sleep(1.0)
 
     browser_stop(browser)
 

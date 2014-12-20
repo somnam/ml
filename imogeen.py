@@ -7,6 +7,7 @@ import re
 import sys
 import json
 import time
+import cookielib
 import httplib
 import urllib2
 import codecs
@@ -19,16 +20,36 @@ from optparse import OptionParser
 from datetime import datetime
 # }}}
 
-def get_url_response(url, data=None):
+def prepare_opener(url, headers=None, data=None):
+    # Prepare request handler.
+    cookie_jar = cookielib.CookieJar()
+    opener     = urllib2.build_opener(
+        urllib2.HTTPCookieProcessor(cookie_jar),
+        # urllib2.HTTPHandler(debuglevel=1),
+    )
+
+    # Prepare request headers.
+    headers = headers if headers else {}
+    # Append user agent to headers.
+    headers['User-Agent'] = headers['User-Agent'] if headers.has_key('User-Agent') \
+                                                  else 'Mozilla/5.0 Gecko Firefox'
+    # Append referer to headers.
+    headers['Referer'] = headers['Referer'] if headers.has_key('Referer') else url
+
+    # Update opener with headers
+    opener.addheaders = [(key, headers[key]) for key in headers.keys()]
+
+    return opener
+
+def get_url_response(url, headers=None, data=None):
     """Send request to given url and ask for response."""
 
-    # Send request to given url and fetch response
-    headers     = { 'User-Agent' : 'Mozilla/5.0' }
-    request     = urllib2.Request(url, headers=headers, data=data)
+    opener  = prepare_opener(url, headers=headers)
+    request = urllib2.Request(url, data=data)
 
     response = None
     try:
-        response = urllib2.urlopen(request)
+        response = opener.open(request)
         if response.getcode() != 200:
             response = None
     except (
@@ -70,7 +91,7 @@ def get_library_url(profile_page):
     if profile_page:
         library_re       = re.compile('profil\/.*\/biblioteczka\/lista')
         library_url_base = profile_page.find('a', { 'href': library_re })
-        library_url      = library_url_base['href']
+        library_url      = get_site_url(library_url_base['href'])
         profile_page.decompose()
 
     return library_url
@@ -329,7 +350,7 @@ def main():
         fetch_shelf_list(options.profile_id, options.shelf)
 
 if __name__ == "__main__":
-    start_time = datetime.now()
+    # start_time = datetime.now()
     main()
     # print("Run time:")
     # print(datetime.now() - start_time)
