@@ -13,9 +13,11 @@ import urllib2
 import codecs
 import locale
 import threading
+from operator import itemgetter
 from multiprocessing.dummy import Pool, cpu_count
 from filecache import filecache
 from BeautifulSoup import BeautifulSoup
+# TODO: Deprecated, use argparse instead.
 from optparse import OptionParser
 from datetime import datetime
 # }}}
@@ -41,10 +43,10 @@ def prepare_opener(url, headers=None, data=None):
 
     return opener
 
-def get_url_response(url, headers=None, data=None):
+def get_url_response(url, headers=None, data=None, opener=None):
     """Send request to given url and ask for response."""
 
-    opener  = prepare_opener(url, headers=headers)
+    opener  = (opener or prepare_opener(url, headers=headers))
     request = urllib2.Request(url, data=data)
 
     response = None
@@ -61,11 +63,11 @@ def get_url_response(url, headers=None, data=None):
 
     return response
 
-def get_parsed_url_response(url, data=None):
+def get_parsed_url_response(url, data=None, opener=None):
     """Send request to given url and return parsed HTML response."""
 
     # Fetch url response object
-    response = get_url_response(url, data=data)
+    response = get_url_response(url, data=data, opener=opener)
 
     # Parse html response (if available)
     parser = None
@@ -81,7 +83,8 @@ def get_parsed_url_response(url, data=None):
     return parser
 
 def get_site_url(suffix):
-    return 'http://lubimyczytac.pl/%s' % suffix
+    url_base = 'http://lubimyczytac.pl'
+    return suffix if re.match(url_base, suffix) else '%s/%s' % (url_base, suffix)
 
 def get_profile_url(profile_id):
     return get_site_url('profil/%d' % profile_id)
@@ -172,15 +175,16 @@ def get_book_info(book_url):
         book_author = breadcrumbs.pop().find('a')
 
         # Get book details.
-        book_details    = book_page.find('div', { 'id': 'dBookDetails' })
-        book_category   = book_details.find('a', { 'itemprop': 'genre' })
-        book_isbn       = book_details.find('span', { 'itemprop': 'isbn' })
+        book_details  = book_page.find('div', { 'id': 'dBookDetails' })
+        book_category = book_details.find('a', { 'itemprop': 'genre' })
+        book_isbn     = book_details.find('span', { 'itemprop': 'isbn' })
+        book_release  = book_details.find('dd', { 'itemprop': 'datePublished' })
 
         # Get original title if present.
         book_original_title     = None
         book_original_title_re  = re.compile('tytu?')
         # Get pages number.
-        book_pages_no = None
+        book_pages_no    = None
         book_pages_no_re = re.compile('liczba stron')
         for div in book_details.findAll('div', { 'class': 'profil-desc-inline' }):
             if div.find(text=book_original_title_re):
@@ -197,6 +201,7 @@ def get_book_info(book_url):
             'isbn'              : book_isbn.string if book_isbn else None,
             'pages'             : book_pages_no,
             'url'               : book_url,
+            'release'           : book_release['content'] if book_release else None,
         }
 
         book_page.decompose()
@@ -301,8 +306,8 @@ def fetch_shelf_list(profile_id, shelf):
     # Fetch info of all books on list
     shelf_books = collect_shelf_books(*pager_info)
 
-    # Sort books by rating
-    # shelf_books.sort(key=itemgetter('rating'), reverse=True)
+    # Sort books by release.
+    shelf_books.sort(key=itemgetter('release'), reverse=True)
 
     # Dump list of books to file
     dump_books_list(shelf_books, ('imogeen_%s.json' % shelf))
@@ -327,6 +332,7 @@ def main():
     option_parser.add_option("-t", "--to-read", action="store_true")
     option_parser.add_option("-o", "--owned", action="store_true")
     option_parser.add_option("-r", "--read", action="store_true")
+    option_parser.add_option("-p", "--hunt", action="store_true")
     option_parser.add_option("-s", "--shelf")
     option_parser.add_option("-i", "--profile-id")
 
@@ -335,7 +341,13 @@ def main():
     if not options.profile_id:
         options.profile_id = 10058
 
-    if not (options.to_read or options.owned or options.read or options.shelf):
+    if not (
+        options.to_read or 
+        options.owned or 
+        options.read or 
+        options.hunt or
+        options.shelf
+    ):
         # Display help
         option_parser.print_help()
     elif options.to_read:
@@ -346,6 +358,8 @@ def main():
     elif options.owned:
         # Scan owned list.
         fetch_shelf_list(options.profile_id, 'posiadam')
+    elif options.hunt:
+        fetch_shelf_list(options.profile_id, 'polowanie-biblioteczne');
     elif options.shelf:
         fetch_shelf_list(options.profile_id, options.shelf)
 

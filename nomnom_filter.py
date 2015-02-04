@@ -257,7 +257,7 @@ def get_worksheet_name(options):
 
     return worksheet_name
 
-def get_writable_worksheet(client, worksheet_name, spreadsheet_id, row_count=100):
+def get_writable_worksheet(client, worksheet_name, spreadsheet_id, row_count=100, col_count=20):
 
     # Used for name comparison.
     stdin_enc = sys.stdin.encoding
@@ -277,7 +277,7 @@ def get_writable_worksheet(client, worksheet_name, spreadsheet_id, row_count=100
             title=worksheet_name,
             # Arbitrary number of rows. Must be later adjusted to no. of hits.
             row_count=row_count,
-            col_count=20,
+            col_count=col_count,
             key=spreadsheet_id
         )
     # Clear worksheet.
