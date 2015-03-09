@@ -376,7 +376,8 @@ def main():
             ssid = retrieve_spreadsheet_id(client, SPREADSHEET_TITLE)
 
             # Get worksheet for writing recipes.
-            dst_worksheet_name = get_worksheet_name(options)
+            dst_worksheet_name   = get_worksheet_name(options)
+            filtered_recipes_len = len(filtered_recipes)
             print("Fetching destination worksheet '%s'." % dst_worksheet_name)
             dst_worksheet = get_writable_worksheet(
                 client,
@@ -386,7 +387,6 @@ def main():
             )
 
             print("Fetching destination cells.")
-            filtered_recipes_len = len(filtered_recipes)
             dst_cells = get_writable_cells(
                 client,
                 dst_worksheet,

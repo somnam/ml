@@ -273,19 +273,49 @@ def write_movie_info(client, writable_cells, movie_info):
         batch_request, writable_cells.GetBatchLink().href
     )
 
+def make_dir_if_not_exists(dir_path):
+    if not os.path.exists(dir_path):
+        try:
+            os.makedirs(dir_path)
+        except:
+            if not os.path.isdir(dir_path):
+                raise
+        else:
+            print(u'Creating path %s' % dir_path.decode('utf-8'))
+
+
+def extract_folders(extract_path):
+    dirs = os.listdir(extract_path)
+    vdir = 'Videos'
+
+    # If we have dirs to process, check if 'Videos' direcotry is present.
+    if dirs:
+        make_dir_if_not_exists(get_file_path(vdir))
+
+    for dir_name in dirs:
+        dir_path = os.path.join(os.path.dirname(__file__), vdir, dir_name)
+        make_dir_if_not_exists(dir_path)
+
 def main():
     # Cmd options parser
     option_parser = OptionParser()
 
     option_parser.add_option("-d", "--dir")
+    option_parser.add_option("-e", "--extract")
     option_parser.add_option("-a", "--auth-data")
 
     (options, args) = option_parser.parse_args()
 
-    if not (options.dir and options.auth_data):
+    if not (
+        options.extract or
+        (options.dir and options.auth_data)
+    ):
         option_parser.print_help()
-    else:
-        dirs = os.listdir(options.dir)
+    elif options.extract:
+        # Get folder names from given location and update contents of Videos dir.
+        extract_folders(options.extract)
+    elif options.dir:
+        dirs    = os.listdir(options.dir)
 
         if dirs and FILTERS:
             # Create workers pool.
