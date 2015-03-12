@@ -12,7 +12,13 @@ import codecs
 import gdata.spreadsheet.service
 from optparse import OptionParser
 from multiprocessing.dummy import Pool, cpu_count, Lock
-from imogeen import prepare_opener, get_parsed_url_response, get_file_path
+from imogeen import (
+    prepare_opener,
+    get_parsed_url_response,
+    get_file_path,
+    print_progress,
+    print_progress_end
+)
 from nomnom_filter import (
     get_auth_data,
     get_json_file,
@@ -47,8 +53,7 @@ def extract_info(movie_title):
          + imdb_info(movie_title)
 
     # Print progress.
-    sys.stdout.write(".")
-    sys.stdout.flush()
+    print_progress()
 
     return info
 
@@ -328,8 +333,7 @@ def main():
             print(u'Fetching %d movies info.' % len(tokens))
             info   = pool.map(extract_info, tokens)
             # End progress print.
-            sys.stdout.write("\n")
-            sys.stdout.flush()
+            print_progress_end()
 
             if info:
                 # Append headers.

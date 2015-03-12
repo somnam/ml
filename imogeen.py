@@ -89,57 +89,94 @@ def get_site_url(suffix):
 def get_profile_url(profile_id):
     return get_site_url('profil/%d' % profile_id)
 
+def get_profile_name(profile_id):
+    profile_url  = get_profile_url(profile_id)
+    profile_page = get_parsed_url_response(profile_url)
+
+    profile_name = ''
+    if profile_page:
+        profile_header = profile_page.find(
+            'div', 
+            { 'class': re.compile('profile-header') }
+        )
+        if profile_header:
+            profile_name = profile_header.find('h5', { 'class': 'title' }).string
+        profile_page.decompose()
+
+    return profile_name
+
+def get_library_re():
+    return re.compile('.*profil\/.*\/biblioteczka\/lista')
+
 def get_library_url(profile_page):
     library_url = None
     if profile_page:
-        library_re       = re.compile('profil\/.*\/biblioteczka\/lista')
+        library_re       = get_library_re()
         library_url_base = profile_page.find('a', { 'href': library_re })
         library_url      = get_site_url(library_url_base['href'])
         profile_page.decompose()
 
     return library_url
 
+def get_shelf_list_url(shelf_url):
+    return shelf_url.replace('miniatury', 'lista')
+
 def get_shelf_url(library_page, shelf):
     shelf_url = None
     if library_page:
         to_read_re       = re.compile('%s\/miniatury' % shelf)
         to_read_class_re = re.compile('shelf-name')
-        shelf_url_base = library_page.find(
+        shelf_url_base   = library_page.find(
             'a',
             { 'href': to_read_re, 'class': to_read_class_re }
         )
-        shelf_url      = get_site_url(shelf_url_base['href']).replace(
-            'miniatury', 'lista'
+        shelf_url        = get_shelf_list_url(
+            get_site_url(shelf_url_base['href'])
         )
+
         library_page.decompose()
 
     return shelf_url
 
-def get_pager_info(shelf_page):
+def get_pager_info(shelf_page, shelf_page_url):
     """Get pager count and link from div."""
 
     pager_info = None
     if shelf_page:
+        # Default pager values.
+        pager_count, pager_url_base = 1, shelf_page_url
+
         # Get last pager entry.
-        pager_cell      = shelf_page.find('td', { 'class': 'centered' })
-        pager_tags      = pager_cell.findAll('a')
-        last_pager_tag  = pager_tags.pop()
+        pager = shelf_page.find('table', { 'class': 'pager-default' })
+        if pager:
+            pager_cell     = pager.find('td', { 'class': 'centered' })
+            pager_tags     = pager_cell.findAll('a')
+            last_pager_tag = pager_tags.pop()
 
-        # Get pages count
-        pager_count = int(re.search('\d+$', last_pager_tag['href']).group())
+            # Get pages count
+            pager_count = int(re.search('\d+$', last_pager_tag['href']).group())
 
-        # Remove page index from pager url so the url can be reused
-        pager_url_base = re.sub(
-            '\d+$',
-            '',
-            last_pager_tag['href']
-        )
+            # Remove page index from pager url so the url can be reused
+            pager_url_base = re.sub(
+                '\d+$',
+                '',
+                last_pager_tag['href']
+            )
 
+        # List composition.
         pager_info = pager_count, pager_url_base
 
         shelf_page.decompose()
 
     return pager_info
+
+def print_progress():
+    sys.stdout.write(".")
+    sys.stdout.flush()
+
+def print_progress_end():
+    sys.stdout.write("\n")
+    sys.stdout.flush()
 
 def get_books_on_page(pager_url):
     """Get list of books on current page."""
@@ -153,6 +190,7 @@ def get_books_on_page(pager_url):
         )
         books = [ book['href'] for book in book_tags ]
         pager_page.decompose()
+        print_progress()
 
     return books
 
@@ -205,6 +243,7 @@ def get_book_info(book_url):
         }
 
         book_page.decompose()
+        print_progress()
 
     return book_info
 
@@ -218,20 +257,17 @@ def collect_shelf_books(pager_count, pager_url_base):
         # Assume 10 books per page.
         books_batch_count = 10
 
-        print("Fetching %d shelf pages..." % pager_count)
+        print("Fetching %d shelf pages." % pager_count)
         pager_urls = [
             '%s%d' % (pager_url_base, index)
             for index in range(1, (pager_count+1))
         ]
 
-        print("Fetching approximately %d book urls..." % (
-            # Each page contains 10 books.
-            len(pager_urls)*books_batch_count
-        ))
         books_per_page = pool.map(
             get_books_on_page,
             pager_urls
         )
+        print_progress_end()
 
         book_urls = [
             book
@@ -239,14 +275,16 @@ def collect_shelf_books(pager_count, pager_url_base):
             for book in books
         ]
 
-        print("Fetched %d book urls." % len(book_urls))
-
-        print("Fetching %d books info..." % len(book_urls))
-        shelf_books = pool.map(
-            get_book_info,
-            book_urls
-        )
-        print("Fetched %d books." % len(shelf_books))
+        if book_urls:
+            print("Fetching %d books info." % len(book_urls))
+            shelf_books = pool.map(
+                get_book_info,
+                book_urls
+            )
+            print_progress_end()
+            print("Fetched %d books." % len(shelf_books))
+        else:
+            print('No books fetched.')
 
         # No new jobs can be added to pool.
         pool.close()
@@ -270,58 +308,97 @@ def dump_json_file(struct, file_name):
 
     return
 
-def dump_books_list(shelf_books, file_name):
-    if shelf_books:
-        # Save sorted list to json
-        print("Dumping results to file.")
-        dump_json_file(shelf_books, file_name)
-
-    return
-
-def fetch_shelf_list(profile_id, shelf):
-    # Get profile url
-    profile_url = get_profile_url(profile_id)
-
-    # Fetch profile page
-    print("Fetching profile page.")
-    profile_page = get_parsed_url_response(profile_url)
-
-    # Make library url.
-    library_url = get_library_url(profile_page)
-
-    # Fetch library page.
-    print("Fetching library page.")
-    library_page = get_parsed_url_response(library_url)
-
-    # Make 'to read' url
-    shelf_url = get_shelf_url(library_page, shelf)
-
-    # Fetch 'to read' books list
-    print("Fetching '%s' books list." % shelf)
-    shelf_page = get_parsed_url_response(shelf_url)
-
-    # Get pages url and count
-    pager_info = get_pager_info(shelf_page)
-
-    # Fetch info of all books on list
-    shelf_books = collect_shelf_books(*pager_info)
-
-    # Sort books by release.
-    shelf_books.sort(key=itemgetter('release'), reverse=True)
-
-    # Dump list of books to file
-    dump_books_list(shelf_books, ('imogeen_%s.json' % shelf))
-
 def get_file_path(file_name):
     return os.path.join(
         os.path.dirname(__file__),
         file_name
     )
 
-def fix_stdout_locale():
-    encoding   = 'utf-8'
-    sys.stdout = codecs.getwriter(encoding)(sys.stdout)
-    sys.stderr = codecs.getwriter(encoding)(sys.stderr)
+def dump_books_list(shelf_books, file_name):
+    if shelf_books:
+        # Save sorted list to json
+        print("Dumping results to file %s." % file_name)
+        dump_json_file(shelf_books, file_name)
+
+    return
+
+def fetch_shelf_list(profile_id, shelf_name=None, shelf_url=None):
+    # Fetch shelf url if required.
+    if not shelf_url:
+        # Get profile url
+        profile_url = get_profile_url(profile_id)
+
+        # Fetch profile page
+        print("Fetching profile page.")
+        profile_page = get_parsed_url_response(profile_url)
+
+        # Make library url.
+        library_url = get_library_url(profile_page)
+
+        # Fetch library page.
+        print("Fetching library page.")
+        library_page = get_parsed_url_response(library_url)
+
+        # Make 'to read' url
+        shelf_url = get_shelf_url(library_page, shelf_name)
+
+    # Fetch 'to read' books list
+    shelf_page = get_parsed_url_response(shelf_url)
+    print("Fetching '%s' books list." % shelf_name)
+
+    # Get pages url and count
+    pager_info = get_pager_info(shelf_page, shelf_url)
+
+    # Fetch info of all books on list
+    shelf_books = collect_shelf_books(*pager_info)
+
+    if shelf_books:
+        # Sort books by release.
+        shelf_books.sort(key=itemgetter('release'), reverse=True)
+
+        # Dump list of books to file
+        profile_name = get_profile_name(profile_id)
+        dump_books_list(shelf_books, ('%s_%s.json' % (profile_name, shelf_name)))
+
+def fetch_shelves_info(profile_id):
+
+    # Fetch library page.
+    profile_url  = get_profile_url(profile_id)
+    profile_page = get_parsed_url_response(profile_url)
+    library_url  = get_library_url(profile_page)
+    library_page = get_parsed_url_response(library_url)
+
+    shelves_info = []
+    if library_page:
+        shelves_list = library_page.find(
+            'ul', 
+            { 'class': re.compile('shelfs-list') }
+        )
+        if shelves_list:
+            for shelf in shelves_list.findAll('a', { 'class': re.compile('shelf') }):
+                shelves_info.append({
+                    'name':     shelf.string,
+                    'filename': shelf['href'].split('/')[-2],
+                    'url':      get_shelf_list_url(get_site_url(shelf['href'])),
+                })
+
+    return shelves_info
+
+def fetch_all_shelves(profile_id):
+    shelves = fetch_shelves_info(profile_id)
+
+    library_re = get_library_re()
+
+    for shelf in shelves:
+        # Skip library shelf.
+        if library_re.match(shelf['url']):
+            continue
+        fetch_shelf_list(
+            profile_id, 
+            shelf_name=shelf['filename'],
+            shelf_url=shelf['url']
+        )
+
     return
 
 def main():
@@ -334,20 +411,17 @@ def main():
     option_parser.add_option("-r", "--read", action="store_true")
     option_parser.add_option("-p", "--hunt", action="store_true")
     option_parser.add_option("-s", "--shelf")
-    option_parser.add_option("-i", "--profile-id")
+    option_parser.add_option("-i", "--profile-id", type="int")
 
     (options, args) = option_parser.parse_args()
 
-    if not options.profile_id:
-        options.profile_id = 10058
-
-    if not (
+    if not (options.profile_id and (
         options.to_read or 
         options.owned or 
         options.read or 
         options.hunt or
         options.shelf
-    ):
+    )):
         # Display help
         option_parser.print_help()
     elif options.to_read:
@@ -361,7 +435,11 @@ def main():
     elif options.hunt:
         fetch_shelf_list(options.profile_id, 'polowanie-biblioteczne');
     elif options.shelf:
-        fetch_shelf_list(options.profile_id, options.shelf)
+        # Fetch books from all shelves.
+        if options.shelf == 'all':
+            fetch_all_shelves(options.profile_id)
+        else:
+            fetch_shelf_list(options.profile_id, options.shelf)
 
 if __name__ == "__main__":
     # start_time = datetime.now()
