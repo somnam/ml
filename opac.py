@@ -358,13 +358,15 @@ def get_books_source_file(source):
     )
 
 def refresh_books_list(source):
-    script_file = './imogeen.py'
+    script_file = get_file_path('imogeen.py')
     return subprocess.call([
         sys.executable,
         '-tt',
         script_file,
         '-s',
-        source
+        source,
+        '-i',
+        '10058'
     ])
 
 def main():

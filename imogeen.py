@@ -322,7 +322,7 @@ def dump_books_list(shelf_books, file_name):
 
     return
 
-def fetch_shelf_list(profile_id, shelf_name=None, shelf_url=None):
+def fetch_shelf_list(profile_id, shelf_name=None, shelf_url=None, file_name=None):
     # Fetch shelf url if required.
     if not shelf_url:
         # Get profile url
@@ -357,12 +357,15 @@ def fetch_shelf_list(profile_id, shelf_name=None, shelf_url=None):
         shelf_books.sort(key=itemgetter('release'), reverse=True)
 
         # Dump list of books to file
-        profile_name = get_profile_name(profile_id)
-        dump_books_list(shelf_books, ('%s_%s.json' % (profile_name, shelf_name)))
+        if not file_name:
+            profile_name = get_profile_name(profile_id)
+            file_name    = '%s_%s.json' % (profile_name, shelf_name)
+        dump_books_list(shelf_books, file_name)
 
-def fetch_shelves_info(profile_id):
+def fetch_shelves_info(profile_id, skip_library_shelf=True):
 
     # Fetch library page.
+    profile_name = get_profile_name(profile_id)
     profile_url  = get_profile_url(profile_id)
     profile_page = get_parsed_url_response(profile_url)
     library_url  = get_library_url(profile_page)
@@ -375,28 +378,36 @@ def fetch_shelves_info(profile_id):
             { 'class': re.compile('shelfs-list') }
         )
         if shelves_list:
+            library_re = get_library_re() if skip_library_shelf else None
+
             for shelf in shelves_list.findAll('a', { 'class': re.compile('shelf') }):
+                shelf_url = get_shelf_list_url(get_site_url(shelf['href']))
+
+                # Skip library shelf.
+                if skip_library_shelf and library_re.match(shelf_url):
+                    continue
+
+                shelf_name = shelf['href'].split('/')[-2]
                 shelves_info.append({
-                    'name':     shelf.string,
-                    'filename': shelf['href'].split('/')[-2],
-                    'url':      get_shelf_list_url(get_site_url(shelf['href'])),
+                    'title':    shelf.string,
+                    'name':     shelf_name,
+                    'filename': '%s_%s.json' % (profile_name, shelf_name),
+                    'url':      shelf_url,
                 })
+
+        library_page.decompose()
 
     return shelves_info
 
 def fetch_all_shelves(profile_id):
     shelves = fetch_shelves_info(profile_id)
 
-    library_re = get_library_re()
-
     for shelf in shelves:
-        # Skip library shelf.
-        if library_re.match(shelf['url']):
-            continue
         fetch_shelf_list(
             profile_id, 
-            shelf_name=shelf['filename'],
-            shelf_url=shelf['url']
+            shelf_name=shelf['name'],
+            shelf_url=shelf['url'],
+            file_name=shelf['filename'],
         )
 
     return

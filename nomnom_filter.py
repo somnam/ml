@@ -32,8 +32,11 @@ def get_json_file(file_name):
     file_path = get_file_path(file_name)
 
     file_data = None
-    with codecs.open(file_path, 'r', 'utf-8') as file_handle:
-        file_data = json.load(file_handle)
+    try:
+        with codecs.open(file_path, 'r', 'utf-8') as file_handle:
+            file_data = json.load(file_handle)
+    except IOError as (e,s):
+        print "I/O error({0}): {1}".format(e,s)
 
     return file_data
 
