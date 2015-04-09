@@ -13,6 +13,7 @@ import subprocess
 import cookielib
 import urllib2
 import gdata.spreadsheet.service
+from datetime import datetime
 from optparse import OptionParser
 from BeautifulSoup import BeautifulSoup
 from selenium import webdriver
@@ -417,7 +418,10 @@ def main():
         spreadsheet_title = u'Karty'
         ssid              = retrieve_spreadsheet_id(client, spreadsheet_title)
 
-        dst_worksheet_name = shelf_name.capitalize()
+        dst_worksheet_name = '{0} {1}'.format(
+            shelf_name.capitalize().replace('-', ' '),
+            datetime.today().strftime("%Y-%m-%d")
+        )
         print("Fetching destination worksheet '%s'." % dst_worksheet_name)
         dst_worksheet      = get_writable_worksheet(
             client,
