@@ -2,96 +2,49 @@
 # -*- coding: utf-8 -*-
 
 # Import {{{
-import os
 import re
-import sys
-import json
-import time
-import cookielib
-import httplib
 import urllib2
-import codecs
-import locale
-import threading
+# import time
 from operator import itemgetter
 from multiprocessing.dummy import Pool, cpu_count
 from filecache import filecache
-from BeautifulSoup import BeautifulSoup
 # TODO: Deprecated, use argparse instead.
 from optparse import OptionParser
-from datetime import datetime
+# from datetime import datetime
+from lib.common import (
+    get_file_path,
+    dump_json_file,
+    prepare_opener,
+    open_url,
+    get_parsed_url_response,
+    print_progress,
+    print_progress_end
+)
 # }}}
 
-def prepare_opener(url, headers=None, data=None):
-    # Prepare request handler.
-    cookie_jar = cookielib.CookieJar()
-    opener     = urllib2.build_opener(
-        urllib2.HTTPCookieProcessor(cookie_jar),
-        # urllib2.HTTPHandler(debuglevel=1),
-    )
+LC_URL = u'http://lubimyczytac.pl'
 
-    # Prepare request headers.
-    headers = headers if headers else {}
-    # Append user agent to headers.
-    headers['User-Agent'] = headers['User-Agent'] if headers.has_key('User-Agent') \
-                                                  else 'Mozilla/5.0 Gecko Firefox'
-    # Append referer to headers.
-    headers['Referer'] = headers['Referer'] if headers.has_key('Referer') else url
+def prepare_lc_opener():
+    opener = prepare_opener(LC_URL)
 
-    # Update opener with headers
-    opener.addheaders = [(key, headers[key]) for key in headers.keys()]
+    # Request used to initialize cookie.
+    open_url(LC_URL, opener)
 
     return opener
 
-def get_url_response(url, headers=None, data=None, opener=None):
-    """Send request to given url and ask for response."""
-
-    opener  = (opener or prepare_opener(url, headers=headers))
-    request = urllib2.Request(url, data=data)
-
-    response = None
-    try:
-        response = opener.open(request)
-        if response.getcode() != 200:
-            response = None
-    except (
-        httplib.BadStatusLine,
-        urllib2.HTTPError,
-        urllib2.URLError
-    ) as e:
-        print "Could not fetch url '%s'. Error: %s." % (url, e)
-
-    return response
-
-def get_parsed_url_response(url, data=None, opener=None):
-    """Send request to given url and return parsed HTML response."""
-
-    # Fetch url response object
-    response = get_url_response(url, data=data, opener=opener)
-
-    # Parse html response (if available)
-    parser = None
-    if response:
-        try:
-            parser = BeautifulSoup(
-                response,
-                convertEntities=BeautifulSoup.HTML_ENTITIES
-            )
-        except TypeError:
-            print(u'Error fetching response for url "%s".' % url)
-
-    return parser
+# 'opener' will be created only once.
+def get_parsed_lc_url_response(url, opener = prepare_lc_opener()):
+    return get_parsed_url_response(url, opener = opener)
 
 def get_site_url(suffix):
-    url_base = 'http://lubimyczytac.pl'
-    return suffix if re.match(url_base, suffix) else '%s/%s' % (url_base, suffix)
+    return suffix if re.match(LC_URL, suffix) else '%s/%s' % (LC_URL, suffix)
 
 def get_profile_url(profile_id):
     return get_site_url('profil/%d' % profile_id)
 
 def get_profile_name(profile_id):
     profile_url  = get_profile_url(profile_id)
-    profile_page = get_parsed_url_response(profile_url)
+    profile_page = get_parsed_lc_url_response(profile_url)
 
     profile_name = ''
     if profile_page:
@@ -124,15 +77,16 @@ def get_shelf_list_url(shelf_url):
 def get_shelf_url(library_page, shelf):
     shelf_url = None
     if library_page:
-        to_read_re       = re.compile('%s\/miniatury' % shelf)
+        to_read_re       = re.compile('\/%s\/miniatury' % shelf)
         to_read_class_re = re.compile('shelf-name')
         shelf_url_base   = library_page.find(
             'a',
             { 'href': to_read_re, 'class': to_read_class_re }
         )
-        shelf_url        = get_shelf_list_url(
-            get_site_url(shelf_url_base['href'])
-        )
+        if shelf_url_base:
+            shelf_url = get_shelf_list_url(
+                get_site_url(shelf_url_base['href'])
+            )
 
         library_page.decompose()
 
@@ -170,20 +124,12 @@ def get_pager_info(shelf_page, shelf_page_url):
 
     return pager_info
 
-def print_progress():
-    sys.stdout.write(".")
-    sys.stdout.flush()
-
-def print_progress_end():
-    sys.stdout.write("\n")
-    sys.stdout.flush()
-
 def get_books_on_page(pager_url):
     """Get list of books on current page."""
     
     books = None
     if pager_url:
-        pager_page = get_parsed_url_response(pager_url)
+        pager_page = get_parsed_lc_url_response(pager_url)
         book_tags  = pager_page.findAll(
             'a',
             { 'class' : 'withTipFixed' }
@@ -199,7 +145,7 @@ def get_books_on_page(pager_url):
 def get_book_info(book_url):
     """Get all kinds of info on book."""
 
-    book_page = get_parsed_url_response(book_url)
+    book_page = get_parsed_lc_url_response(book_url)
 
     book_info = None
     if book_page:
@@ -254,9 +200,6 @@ def collect_shelf_books(pager_count, pager_url_base):
         workers_count = cpu_count() * 2
         pool          = Pool(workers_count)
 
-        # Assume 10 books per page.
-        books_batch_count = 10
-
         print("Fetching %d shelf pages." % pager_count)
         pager_urls = [
             '%s%d' % (pager_url_base, index)
@@ -294,31 +237,11 @@ def collect_shelf_books(pager_count, pager_url_base):
 
     return shelf_books
 
-def dump_json_file(struct, file_name):
-    file_path = get_file_path(file_name)
-
-    # utf-8 chars should be displayed properly in results file:
-    # - codecs.open must be used instead of open, with 'utf-8' flag
-    file_handle = codecs.open(file_path, 'w+', 'utf-8')
-
-    # - json.dumps must have ensure_ascii set to False
-    json.dump(struct, file_handle, ensure_ascii=False, indent=2)
-
-    file_handle.close()
-
-    return
-
-def get_file_path(file_name):
-    return os.path.join(
-        os.path.dirname(__file__),
-        file_name
-    )
-
 def dump_books_list(shelf_books, file_name):
     if shelf_books:
         # Save sorted list to json
         print("Dumping results to file %s." % file_name)
-        dump_json_file(shelf_books, file_name)
+        dump_json_file(shelf_books, get_file_path(file_name))
 
     return
 
@@ -330,27 +253,29 @@ def fetch_shelf_list(profile_id, shelf_name=None, shelf_url=None, file_name=None
 
         # Fetch profile page
         print("Fetching profile page.")
-        profile_page = get_parsed_url_response(profile_url)
+        profile_page = get_parsed_lc_url_response(profile_url)
 
         # Make library url.
         library_url = get_library_url(profile_page)
 
         # Fetch library page.
         print("Fetching library page.")
-        library_page = get_parsed_url_response(library_url)
+        library_page = get_parsed_lc_url_response(library_url)
 
         # Make 'to read' url
         shelf_url = get_shelf_url(library_page, shelf_name)
 
-    # Fetch 'to read' books list
-    shelf_page = get_parsed_url_response(shelf_url)
-    print("Fetching '%s' books list." % shelf_name)
+    shelf_books = None
+    if shelf_url:
+        # Fetch 'to read' books list
+        shelf_page = get_parsed_lc_url_response(shelf_url)
+        print("Fetching '%s' books list." % shelf_name)
 
-    # Get pages url and count
-    pager_info = get_pager_info(shelf_page, shelf_url)
+        # Get pages url and count
+        pager_info = get_pager_info(shelf_page, shelf_url)
 
-    # Fetch info of all books on list
-    shelf_books = collect_shelf_books(*pager_info)
+        # Fetch info of all books on list
+        shelf_books = collect_shelf_books(*pager_info)
 
     if shelf_books:
         # Sort books by release.
@@ -361,15 +286,17 @@ def fetch_shelf_list(profile_id, shelf_name=None, shelf_url=None, file_name=None
             profile_name = get_profile_name(profile_id)
             file_name    = '%s_%s.json' % (profile_name, shelf_name)
         dump_books_list(shelf_books, file_name)
+    else:
+        print('No books were found for shelf "{0}".'.format(shelf_name))
 
 def fetch_shelves_info(profile_id, skip_library_shelf=True):
 
     # Fetch library page.
     profile_name = get_profile_name(profile_id)
     profile_url  = get_profile_url(profile_id)
-    profile_page = get_parsed_url_response(profile_url)
+    profile_page = get_parsed_lc_url_response(profile_url)
     library_url  = get_library_url(profile_page)
-    library_page = get_parsed_url_response(library_url)
+    library_page = get_parsed_lc_url_response(library_url)
 
     shelves_info = []
     if library_page:
@@ -420,7 +347,6 @@ def main():
     option_parser.add_option("-t", "--to-read", action="store_true")
     option_parser.add_option("-o", "--owned", action="store_true")
     option_parser.add_option("-r", "--read", action="store_true")
-    option_parser.add_option("-p", "--hunt", action="store_true")
     option_parser.add_option("-s", "--shelf")
     option_parser.add_option("-i", "--profile-id", type="int")
 
@@ -430,7 +356,6 @@ def main():
         options.to_read or 
         options.owned or 
         options.read or 
-        options.hunt or
         options.shelf
     )):
         # Display help
@@ -443,8 +368,6 @@ def main():
     elif options.owned:
         # Scan owned list.
         fetch_shelf_list(options.profile_id, 'posiadam')
-    elif options.hunt:
-        fetch_shelf_list(options.profile_id, 'polowanie-biblioteczne');
     elif options.shelf:
         # Fetch books from all shelves.
         if options.shelf == 'all':

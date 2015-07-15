@@ -12,16 +12,16 @@ import codecs
 import gdata.spreadsheet.service
 from optparse import OptionParser
 from multiprocessing.dummy import Pool, cpu_count, Lock
-from imogeen import (
+from lib.common import (
     prepare_opener,
     get_parsed_url_response,
     get_file_path,
-    print_progress,
-    print_progress_end
-)
-from nomnom_filter import (
-    get_auth_data,
     get_json_file,
+    print_progress,
+    print_progress_end,
+)
+from lib.gdocs import (
+    get_auth_data,
     connect_to_service,
     retrieve_spreadsheet_id,
     get_writable_worksheet,

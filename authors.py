@@ -11,23 +11,22 @@ import gdata.spreadsheet.service
 from filecache import filecache
 from optparse import OptionParser
 from multiprocessing.dummy import Pool, Lock, cpu_count
-from nomnom_filter import get_json_file
-from imogeen import get_parsed_url_response
-from nomnom_filter import (
+from lib.common import get_parsed_url_response, get_json_file
+from lib.gdocs import (
     get_auth_data,
     connect_to_service,
     retrieve_spreadsheet_id,
     get_writable_worksheet,
     get_writable_cells
 )
-from opac import get_books_source, refresh_books_list
+from opac import get_books_source_file, refresh_books_list
 # }}}
 
 LOCK = Lock()
 
 def get_unique_authors(books_list):
     authors = set()
-    for book in books_list:
+    for book in (books_list or []):
         if book and book['author']:
             authors.add(
                 re.sub(r'\s+', ' ', book['author'].strip()).encode('utf-8')
@@ -145,6 +144,7 @@ def main():
     option_parser.add_option("-r", "--refresh", action="store_true")
     option_parser.add_option("-a", "--auth-data")
     option_parser.add_option("-s", "--source")
+    option_parser.add_option("-d", "--destination")
 
     (options, args) = option_parser.parse_args()
 
@@ -156,7 +156,7 @@ def main():
             print(u'Updating list of books from source "%s".' % options.source)
             refresh_books_list(options.source)
 
-        books_source = get_books_source(options.source)
+        books_source = get_books_source_file(options.source)
 
         # Read in source file.
         books_list = get_json_file(books_source)
@@ -177,7 +177,7 @@ def main():
         ssid              = retrieve_spreadsheet_id(client, spreadsheet_title)
 
         # Destination worksheet boilerplate.
-        dst_name      = u'Krajoliteratura'
+        dst_name      = (options.destination or u'Krajoliteratura')
         print(u"Fetching destination worksheet '%s'." % dst_name)
         dst_worksheet = get_writable_worksheet(
             client,

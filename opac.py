@@ -1,6 +1,7 @@
 #!/usr/bin/pyth n -tt
 # -*- coding: utf-8 -*-
 
+# Import {{{
 import os
 import re
 import sys
@@ -22,24 +23,19 @@ from selenium.webdriver.support.ui import WebDriverWait
 from selenium.webdriver.support import expected_conditions
 from selenium.webdriver.common.by import By
 from selenium.webdriver.common.keys import Keys
-from imogeen import get_file_path, dump_books_list, prepare_opener
-from nomnom_filter import (
-    get_auth_data,
-    connect_to_service,
-    retrieve_spreadsheet_id,
-    get_writable_worksheet,
-    get_writable_cells
+from lib.common import get_file_path, prepare_opener, open_url
+from lib.gdocs import (
+    get_service_client,
+    get_destination_cells
 )
+from lib.xls import make_xls
+# }}}
 
 # Lovely constants.
 OPAC_URL       = 'http://opac.ksiaznica.bielsko.pl/'
 
 def browser_start():
     print(u'Starting browser.')
-
-    # Set browser profile.
-    # profile = webdriver.FirefoxProfile('./firefox.selenium')
-    # browser = webdriver.Firefox(firefox_profile=profile)
 
     # Load webdriver.
     browser = webdriver.Firefox()
@@ -103,8 +99,7 @@ def browser_click(browser, elem):
 def prepare_opac_opener():
     opener = prepare_opener(OPAC_URL)
     # Request used to initialize cookie.
-    request = urllib2.Request(OPAC_URL)
-    opener.open(request)
+    open_url(OPAC_URL, opener)
 
     return opener
 
@@ -246,18 +241,12 @@ def get_book_info(browser, book, search_field):
     )
     info    = extract_book_info(browser, book, match)
 
-    result = None
     if info:
         print(u'Book info found.')
-        result = {
-            'author': book['author'],
-            'title' : '"%s"' % book['title'],
-            'info'  : info if info else "Brak",
-        }
     else:
         print(u'Failed fetching book info.')
 
-    return result
+    return info
 
 def get_library_status(books_list):
     if not books_list:
@@ -270,7 +259,7 @@ def get_library_status(books_list):
     browser_load_opac(browser)
 
     # Will contains books info.
-    books_info = []
+    library_status = []
 
     # Default value for request timeout.
     socket_timeout = 4.0
@@ -308,7 +297,7 @@ def get_library_status(books_list):
             # Append book info if present.
             if book_info:
                 print(u'Succsessfully queried book info.')
-                books_info.append(book_info)
+                break
             else:
                 # Retry?
                 retry -= 1
@@ -317,9 +306,19 @@ def get_library_status(books_list):
             # Sleep for short time to avoid too frequent requests.
             time.sleep(1.0)
 
+        # Append book info.
+        library_status.append({
+            'author': book['author'],
+            'title' : '"%s"' % book['title'],
+            'info'  : book_info if book_info else "Brak",
+        })
+
     browser_stop(browser)
 
-    return books_info
+    return library_status
+
+def get_worksheet_name(shelf_name):
+    return datetime.today().strftime("%Y-%m-%d")
 
 def get_books_list(file_name):
 
@@ -331,7 +330,23 @@ def get_books_list(file_name):
 
     return books_list
 
-def write_books(client, dst_cells, library_status):
+def write_books_to_gdata(auth_data, shelf_name, library_status):
+    # Fetch gdata client.
+    client = get_service_client(auth_data)
+
+    # Fetch spreadsheet params.
+    spreadsheet_title  = u'Karty'
+    dst_worksheet_name = get_worksheet_name(shelf_name)
+    status_entries_len = len(library_status)
+
+    writable_cells = get_destination_cells(
+        client,
+        spreadsheet_title,
+        dst_worksheet_name,
+        status_entries_len
+    )
+
+    print("Writing books.")
     # Prepare request that will be used to update worksheet cells.
     batch_request = gdata.spreadsheet.SpreadsheetsCellsFeed()
 
@@ -351,6 +366,17 @@ def write_books(client, dst_cells, library_status):
     # Execute batch update of destination cells.
     return client.ExecuteBatch(
         batch_request, dst_cells.GetBatchLink().href
+    )
+
+def write_books_to_xls(shelf_name, library_status):
+    worksheet_name    = get_worksheet_name(shelf_name)
+    worksheet_headers = (u'author', u'title', u'info')
+
+    return make_xls(
+        shelf_name,
+        worksheet_name,
+        worksheet_headers,
+        library_status
     )
 
 def get_books_source_file(source):
@@ -381,66 +407,31 @@ def main():
 
     (options, args) = option_parser.parse_args()
 
-    if not options.auth_data:
-        # Display help.
-        option_parser.print_help()
+    shelf_name   = 'polowanie-biblioteczne'
+    books_source = (options.source or shelf_name)
+
+    if options.refresh:
+        print(u'Updating list of books from source "%s".' % books_source)
+        refresh_books_list(books_source)
+
+    books_source_file = get_books_source_file(books_source)
+
+    # Read in books list.
+    print(u'Reading in books list.')
+    books_list = get_books_list(books_source_file)
+
+    # Fetch books library status.
+    print(u'Fetching books library status.')
+    library_status = get_library_status(books_list)
+
+    if options.auth_data:
+        write_books_to_gdata(
+            options.auth_data, shelf_name, library_status
+        )
     else:
-        shelf_name   = 'polowanie-biblioteczne'
-        books_source = (options.source or shelf_name)
-
-        if options.refresh:
-            print(u'Updating list of books from source "%s".' % books_source)
-            refresh_books_list(books_source)
-
-        books_source_file = get_books_source_file(books_source)
-
-        # Read in books list.
-        print(u'Reading in books list.')
-        books_list = get_books_list(books_source_file)
-
-        # Fetch books library status.
-        print(u'Fetching books library status.')
-        library_status     = get_library_status(books_list)
-        status_entries_len = len(library_status)
-
-        # dump_books_list(library_status, 'opac.json')
-        # library_status = get_books_list('opac.json')
-
-        # Read auth data from input file.
-        print(u'Fetching auth data.')
-        auth_data = get_auth_data(options.auth_data)
-
-        # Connect to spreadsheet service.
-        print(u'Authenticating to Google service.')
-        client = connect_to_service(auth_data)
-
-        # Fetch spreadsheet id.
-        spreadsheet_title = u'Karty'
-        ssid              = retrieve_spreadsheet_id(client, spreadsheet_title)
-
-        dst_worksheet_name = '{0} {1}'.format(
-            shelf_name.capitalize().replace('-', ' '),
-            datetime.today().strftime("%Y-%m-%d")
+        write_books_to_xls(
+            shelf_name, library_status
         )
-        print("Fetching destination worksheet '%s'." % dst_worksheet_name)
-        dst_worksheet      = get_writable_worksheet(
-            client,
-            dst_worksheet_name,
-            ssid,
-            row_count=status_entries_len,
-        )
-
-        print("Fetching destination cells.")
-        writable_cells = get_writable_cells(
-            client,
-            dst_worksheet,
-            ssid,
-            max_row=status_entries_len,
-            max_col=3,
-        )
-
-        print("Writing books.")
-        write_books(client, writable_cells, library_status)
 
 if __name__ == "__main__":
     main()

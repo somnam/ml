@@ -7,16 +7,17 @@ import codecs
 import gdata.spreadsheet.service
 from optparse import OptionParser
 from BeautifulSoup import BeautifulSoup
-from imogeen import get_file_path
-from nomnom_filter import (
+from lib.common import get_file_path
+from lib.gdocs import (
     get_auth_data,
     connect_to_service,
     retrieve_spreadsheet_id,
     get_writable_worksheet,
     get_writable_cells,
-    SPREADSHEET_TITLE
 )
 # }}}
+
+SPREADSHEET_TITLE = u'Lista'
 
 def get_bookmarks_parser(file_name):
 

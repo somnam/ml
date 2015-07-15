@@ -1,7 +1,7 @@
 #!/usr/bin/pyth n -tt
 # -*- coding: utf-8 -*-
 
-# Import {{{
+# Import 
 import sys
 import re
 import json
@@ -9,52 +9,16 @@ import codecs
 import urllib2
 import threading
 import gdata.spreadsheet.service
-from gdata.service import CaptchaRequired
 from optparse import OptionParser
 from urlparse import urlparse
 from filecache import filecache
-from imogeen import get_parsed_url_response, get_file_path
-# }}}
+from lib.common import get_parsed_url_response, get_file_path
+from lib.gdocs import (
+    get_service_client,
+    get_destination_cells
+)
 
 SPREADSHEET_TITLE = u'Lista'
-
-def get_auth_data(file_name):
-
-    auth_data = None
-    file_data = get_json_file(file_name)
-    if file_data:
-        auth_data = (file_data['login'], file_data['password'])
-
-    return auth_data
-
-def get_json_file(file_name):
-
-    file_path = get_file_path(file_name)
-
-    file_data = None
-    try:
-        with codecs.open(file_path, 'r', 'utf-8') as file_handle:
-            file_data = json.load(file_handle)
-    except IOError as (e,s):
-        print "I/O error({0}): {1}".format(e,s)
-
-    return file_data
-
-def connect_to_service(auth_data):
-    if not auth_data:
-        return
-
-    # Create a client class to make HTTP requests with Google server.
-    client = gdata.spreadsheet.service.SpreadsheetsService()
-
-    # Authenticate using Google Docs email address and password.
-    try:
-        client.ClientLogin(*auth_data)
-    except CaptchaRequired as e:
-        print "Login error : %s" % (e)
-        client = None
-
-    return client
 
 def retrieve_recipe_cells(client):
     if not client:
@@ -83,21 +47,6 @@ def retrieve_recipe_cells(client):
         recipe_cells.append(cells)
 
     return recipe_cells
-
-def retrieve_spreadsheet_id(client, title):
-    if not client:
-        return
-
-    query       = gdata.spreadsheet.service.DocumentQuery()
-    query.title = title
-    sheet_feed  = client.GetSpreadsheetsFeed(query=query)
-
-    spreadsheet_id = None
-    if sheet_feed.entry:
-        spreadsheet     = sheet_feed.entry[0]
-        spreadsheet_id  = spreadsheet.id.text.rsplit('/', 1)[-1]
-
-    return spreadsheet_id
 
 def filter_nomnoms(row, lock, filtered_recipes, contains_re, filter_re):
 
@@ -260,63 +209,6 @@ def get_worksheet_name(options):
 
     return worksheet_name
 
-def get_writable_worksheet(client, worksheet_name, spreadsheet_id, row_count=100, col_count=20):
-
-    # Used for name comparison.
-    stdin_enc = sys.stdin.encoding
-
-    # Get worksheet for given name.
-    work_feed = client.GetWorksheetsFeed(spreadsheet_id)
-    worksheet = None
-    for worksheet_entry in work_feed.entry:
-        worksheet_entry_name = worksheet_entry.title.text.decode(stdin_enc)
-        if worksheet_entry_name == worksheet_name:
-            worksheet = worksheet_entry
-            break
-
-    # Create new worksheet when none was found.
-    if not worksheet:
-        worksheet = client.AddWorksheet(
-            title=worksheet_name,
-            # Arbitrary number of rows. Must be later adjusted to no. of hits.
-            row_count=row_count,
-            col_count=col_count,
-            key=spreadsheet_id
-        )
-    # Clear worksheet.
-    else:
-        # TODO
-        pass
-
-    return worksheet
-
-def decode_options(options):
-    """Decode non-ascii option values."""
-
-    # Used to decode options.
-    stdin_enc = sys.stdin.encoding
-
-    options.contains, options.filter, options.worksheet = (
-        options.contains.decode(stdin_enc) if options.contains else None,
-        options.filter.decode(stdin_enc) if options.filter else None,
-        options.worksheet.decode(stdin_enc) if options.worksheet else None
-    )
-
-    return
-
-def get_writable_cells(client, dst_worksheet, spreadsheet_id, max_row=100, max_col=2):
-
-    cell_query = gdata.spreadsheet.service.CellQuery()
-    cell_query.return_empty = 'true'
-    cell_query.max_row = '%d' % max_row
-    cell_query.max_col = '%d' % max_col
-
-    return client.GetCellsFeed(
-        key=spreadsheet_id,
-        wksht_id=dst_worksheet.id.text.rsplit('/', 1)[-1],
-        query=cell_query
-    )
-
 def write_recipes(client, dst_cells, filtered_recipes):
 
     # Prepare request that will be used to update worksheet cells.
@@ -340,6 +232,20 @@ def write_recipes(client, dst_cells, filtered_recipes):
     # Execute batch update of destination cells.
     return client.ExecuteBatch(batch_request, dst_cells.GetBatchLink().href)
 
+def decode_options(options):
+    """Decode non-ascii option values."""
+
+    # Used to decode options.
+    stdin_enc = sys.stdin.encoding
+
+    options.contains, options.filter, options.worksheet = (
+        options.contains.decode(stdin_enc) if options.contains else None,
+        options.filter.decode(stdin_enc) if options.filter else None,
+        options.worksheet.decode(stdin_enc) if options.worksheet else None
+    )
+
+    return
+
 def main():
     # Cmd options parser
     option_parser = OptionParser()
@@ -360,12 +266,8 @@ def main():
     else:
         decode_options(options)
 
-        # Read auth data from input file.
-        auth_data = get_auth_data(options.auth_data)
-
-        # Connect to spreadsheet service.
-        print("Authenticating to Google service.")
-        client = connect_to_service(auth_data)
+        # Fetch gdata client.
+        client = get_service_client(options.auth_data)
 
         print("Retrieving recipes.")
         recipe_cells = retrieve_recipe_cells(client)
@@ -375,26 +277,15 @@ def main():
 
         # Write recipes only when any were found.
         if filtered_recipes:
-            # Fetch spreadsheet id.
-            ssid = retrieve_spreadsheet_id(client, SPREADSHEET_TITLE)
-
             # Get worksheet for writing recipes.
             dst_worksheet_name   = get_worksheet_name(options)
             filtered_recipes_len = len(filtered_recipes)
-            print("Fetching destination worksheet '%s'." % dst_worksheet_name)
-            dst_worksheet = get_writable_worksheet(
-                client,
-                dst_worksheet_name,
-                ssid,
-                row_count=filtered_recipes_len,
-            )
 
-            print("Fetching destination cells.")
-            dst_cells = get_writable_cells(
+            dst_cells = get_destination_cells(
                 client,
-                dst_worksheet,
-                ssid,
-                max_row=filtered_recipes_len,
+                SPREADSHEET_TITLE,
+                dst_worksheet_name,
+                filtered_recipes_len
             )
 
             print("Writing filtered %d recipes." % filtered_recipes_len)
