@@ -53,7 +53,8 @@ def get_profile_name(profile_id):
             { 'class': re.compile('profile-header') }
         )
         if profile_header:
-            profile_name = profile_header.find('h5', { 'class': 'title' }).string
+            profile_name = profile_header.find('h5', { 'class': 'title' }).contents[0]
+            profile_name = profile_name.replace(u'\xa0', u' ').strip()
         profile_page.decompose()
 
     return profile_name
