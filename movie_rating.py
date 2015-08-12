@@ -12,6 +12,7 @@ import codecs
 import gdata.spreadsheet.service
 from optparse import OptionParser
 from multiprocessing.dummy import Pool, cpu_count, Lock
+from filecache import filecache
 from lib.common import (
     prepare_opener,
     get_parsed_url_response,
@@ -21,12 +22,10 @@ from lib.common import (
     print_progress_end,
 )
 from lib.gdocs import (
-    get_auth_data,
-    connect_to_service,
-    retrieve_spreadsheet_id,
-    get_writable_worksheet,
-    get_writable_cells,
+    get_service_client,
+    write_rows_to_worksheet,
 )
+from lib.xls import make_xls
 # }}}
 
 LOCK    = Lock()
@@ -98,6 +97,8 @@ def prepare_site_opener(site_url):
 def prepare_imdb_opener():
     return prepare_site_opener('http://www.imdb.com')
 
+# Invalidate values after 30 days.
+@filecache(30 * 24 * 60 * 60)
 def imdb_info(movie_title, opener=prepare_imdb_opener()):
     # http://www.imdb.com/find?q=
     site_url   = 'http://www.imdb.com'
@@ -197,6 +198,8 @@ def imdb_info(movie_title, opener=prepare_imdb_opener()):
 def prepare_rotten_opener():
     return prepare_site_opener('http://www.rottentomatoes.com/')
 
+# Invalidate values after 30 days.
+@filecache(30 * 24 * 60 * 60)
 def rottentomatoes_info(movie_title, opener=prepare_rotten_opener()):
     # http://www.rottentomatoes.com/search/?search=
     site_url   = 'http://www.rottentomatoes.com'
@@ -256,27 +259,27 @@ def rottentomatoes_movie_info(response):
         audience_meter_value,
     ]
 
-def write_movie_info(client, writable_cells, movie_info):
-    # Prepare request that will be used to update worksheet cells.
-    batch_request = gdata.spreadsheet.SpreadsheetsCellsFeed()
-
-    cell_index = 0
-    for movie in movie_info:
-        for value in movie:
-            # Fetch next cell.
-            text_cell = writable_cells.entry[cell_index]
-
-            # Update cell value.
-            text_cell.cell.inputValue = value
-            batch_request.AddUpdate(text_cell)
-
-            # Go to next cell.
-            cell_index += 1
-
-    # Execute batch update of destination cells.
-    return client.ExecuteBatch(
-        batch_request, writable_cells.GetBatchLink().href
-    )
+# def write_movie_info(client, writable_cells, movie_info):
+#     # Prepare request that will be used to update worksheet cells.
+#     batch_request = gdata.spreadsheet.SpreadsheetsCellsFeed()
+#
+#     cell_index = 0
+#     for movie in movie_info:
+#         for value in movie:
+#             # Fetch next cell.
+#             text_cell = writable_cells.entry[cell_index]
+#
+#             # Update cell value.
+#             text_cell.cell.input_value = value
+#             batch_request.AddUpdate(text_cell)
+#
+#             # Go to next cell.
+#             cell_index += 1
+#
+#     # Execute batch update of destination cells.
+#     return client.ExecuteBatch(
+#         batch_request, writable_cells.GetBatchLink().href
+#     )
 
 def make_dir_if_not_exists(dir_path):
     if not os.path.exists(dir_path):
@@ -293,13 +296,75 @@ def extract_folders(extract_path):
     dirs = os.listdir(extract_path)
     vdir = 'Videos'
 
-    # If we have dirs to process, check if 'Videos' direcotry is present.
+    # If we have dirs to process, check if 'Videos' directory is present.
     if dirs:
         make_dir_if_not_exists(get_file_path(vdir))
 
     for dir_name in dirs:
         dir_path = os.path.join(os.path.dirname(__file__), vdir, dir_name)
         make_dir_if_not_exists(dir_path)
+
+def get_worksheet_name():
+    return u'Filmoceny'
+
+def write_movies_to_gdata(auth_data, headers, info):
+    info.insert(0, headers)
+
+    # Drive connecton boilerplate.
+    print("Authenticating to Google service.")
+    client = get_service_client(auth_data)
+
+    print('Writing movies info.')
+    spreadsheet_title = u'Karty'
+    write_rows_to_worksheet(
+        client,
+        spreadsheet_title,
+        get_worksheet_name(),
+        info,
+    )
+
+def write_movies_to_xls(headers, info):
+    headers_lc = [header.lower() for header in headers]
+    info_map   = [dict(zip(headers_lc, entry)) for entry in info]
+
+    print(u'Writing movies info.')
+    return make_xls(
+        'movie_rating',
+        get_worksheet_name(),
+        headers_lc,
+        info_map,
+    )
+
+def fetch_movie_ratings(directory, auth_data):
+    # Create workers pool.
+    workers_count = cpu_count()
+    pool          = Pool(workers_count)
+
+    print(u'Reading movies directory.')
+    tokens = pool.map(extract_tokens, os.listdir(directory))
+
+    print(u'Fetching %d movies info.' % len(tokens))
+    info   = pool.map(extract_info, tokens)
+    # End progress print.
+    print_progress_end()
+
+    if info:
+        # Append headers.
+        headers = [
+            "Title",
+            "Tomato",
+            "Audience",
+            "IMDB",
+            "Metacritic",
+            "Length",
+            "Genre",
+            "Description",
+        ]
+
+        if auth_data:
+            write_movies_to_gdata(auth_data, headers, info)
+        else:
+            write_movies_to_xls(headers, info)
 
 def main():
     # Cmd options parser
@@ -311,78 +376,13 @@ def main():
 
     (options, args) = option_parser.parse_args()
 
-    if not (
-        options.extract or
-        (options.dir and options.auth_data)
-    ):
+    if not (options.extract or options.dir):
         option_parser.print_help()
     elif options.extract:
         # Get folder names from given location and update contents of Videos dir.
         extract_folders(options.extract)
     elif options.dir:
-        dirs    = os.listdir(options.dir)
-
-        if dirs and FILTERS:
-            # Create workers pool.
-            workers_count = cpu_count()
-            pool          = Pool(workers_count)
-
-            print(u'Reading movies directory.')
-            tokens = pool.map(extract_tokens, dirs)
-            # tokens = tokens[0:20]
-            print(u'Fetching %d movies info.' % len(tokens))
-            info   = pool.map(extract_info, tokens)
-            # End progress print.
-            print_progress_end()
-
-            if info:
-                # Append headers.
-                headers = [
-                    "Title",
-                    "Tomato",
-                    "Audience",
-                    "IMDB",
-                    "Metacritic",
-                    "Length",
-                    "Genre",
-                    "Description",
-                ]
-                info.insert(0, headers)
-
-                movies_len  = len(info)
-                columns_len = len(headers)
-
-                # Drive connecton boilerplate.
-                print("Authenticating to Google service.")
-                auth_data = get_auth_data(options.auth_data)
-                client    = connect_to_service(auth_data)
-
-                # Fetch spreadsheet id.
-                spreadsheet_title = u'Karty'
-                ssid              = retrieve_spreadsheet_id(client, spreadsheet_title)
-
-                # Destination worksheet boilerplate.
-                dst_name      = u'Filmoceny'
-                print(u"Fetching destination worksheet '%s'." % dst_name)
-                dst_worksheet = get_writable_worksheet(
-                    client,
-                    dst_name,
-                    ssid,
-                    row_count=movies_len,
-                    col_count=columns_len,
-                )
-
-                print("Fetching destination cells.")
-                writable_cells = get_writable_cells(
-                    client,
-                    dst_worksheet,
-                    ssid,
-                    max_row=movies_len,
-                    max_col=columns_len,
-                )
-
-                print('Writing movies info.')
-                write_movie_info(client, writable_cells, info)
+        fetch_movie_ratings(options.dir, options.auth_data)
 
 if __name__ == "__main__":
     main()

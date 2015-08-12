@@ -4,18 +4,25 @@
 # Import 
 import sys
 import re
+import zlib
 import json
 import codecs
 import urllib2
 import threading
-import gdata.spreadsheet.service
 from optparse import OptionParser
 from urlparse import urlparse
 from filecache import filecache
-from lib.common import get_parsed_url_response, get_file_path
+from lib.common import (
+    get_parsed_url_response,
+    get_file_path,
+    print_progress,
+    print_progress_end,
+)
 from lib.gdocs import (
     get_service_client,
-    get_destination_cells
+    get_writable_cells,
+    retrieve_spreadsheet_id,
+    write_rows_to_worksheet,
 )
 
 SPREADSHEET_TITLE = u'Lista'
@@ -24,34 +31,25 @@ def retrieve_recipe_cells(client):
     if not client:
         return
 
-    # Prepare cells query.
-    cell_query              = gdata.spreadsheet.service.CellQuery()
-    cell_query.return_empty = 'true'
-    cell_query.max_col      = '2'
-
     # Get worksheet feed.
-    spreadsheet_id    = retrieve_spreadsheet_id(client, SPREADSHEET_TITLE)
-    work_feed         = client.GetWorksheetsFeed(spreadsheet_id)
+    spreadsheet_id = retrieve_spreadsheet_id(client, SPREADSHEET_TITLE)
+    work_feed      = client.GetWorksheets(spreadsheet_id)
 
-    recipe_cells    = []
+    recipe_cells = []
     for worksheet in work_feed.entry:
         # Fetch worksheet cells.
-        print("\tFetching worksheet '%s'." % worksheet.title.text)
-        worksheet_id = worksheet.id.text.rsplit('/', 1)[-1]
-        cells        = client.GetCellsFeed(
-            key=spreadsheet_id,
-            wksht_id=worksheet_id,
-            query=cell_query
+        print_progress()
+        cells = get_writable_cells(
+            client, spreadsheet_id, worksheet, max_col=2
         )
-
         recipe_cells.append(cells)
+    print_progress_end()
 
     return recipe_cells
 
 def filter_nomnoms(row, lock, filtered_recipes, contains_re, filter_re):
-
     # Skip empty rows.
-    recipe_cell  = row[1].cell.inputValue
+    recipe_cell  = row[1].cell.input_value
     if not recipe_cell:
         return
 
@@ -63,7 +61,7 @@ def filter_nomnoms(row, lock, filtered_recipes, contains_re, filter_re):
     if recipe_url.scheme and recipe_url.netloc:
         # Print info.
         with lock:
-            print("\tProcessing url '%s'." % recipe_url_value)
+            print_progress()
 
         filtered_recipe = filter_nomnom_page(
             recipe_url_value,
@@ -91,7 +89,7 @@ def filter_nomnom_page(recipe_url_value, contains_re, filter_re):
     recipe_page = get_nomnom_page(recipe_url_value)
     if recipe_page:
         # Check page content with given filters.
-        if filter_recipe(recipe_page, contains_re, filter_re):
+        if filter_recipe(zlib.decompress(recipe_page), contains_re, filter_re):
             filtered_recipe = True
 
     return filtered_recipe
@@ -102,6 +100,7 @@ def get_nomnom_page(recipe_url):
     # Get BeautifulSoup page instance.
     parser = get_parsed_url_response(recipe_url)
 
+    page = None
     if parser and parser.find('body'):
         # Don't search in header.
         parser = parser.find('body')
@@ -131,10 +130,10 @@ def get_nomnom_page(recipe_url):
                 { 'class': comment_re }
             )]
 
-        # Convert back to string.
-        parser = unicode(parser)
+        # Convert back to string and zip.
+        page = zlib.compress(unicode(parser).encode('utf-8'))
 
-    return parser
+    return page
 
 def filter_recipe(recipe_page, contains_re, filter_re):
     return (
@@ -152,9 +151,6 @@ def filter_recipe_cells(recipe_cells, options):
     if not recipe_cells:
         return
 
-    # Will contain filtered results.
-    filtered_recipes = {}
-
     # Build regexp for required phrases.
     contains_re = None
     if options.contains:
@@ -164,6 +160,9 @@ def filter_recipe_cells(recipe_cells, options):
     filter_re = None
     if options.filter:
         filter_re = build_and_regex(options.filter)
+
+    # Will contain filtered results.
+    filtered_recipes = {}
 
     # Lock for appending row to list.
     lock = threading.Lock()
@@ -193,8 +192,16 @@ def filter_recipe_cells(recipe_cells, options):
                 thread.start()
             for thread in recipe_threads:
                 thread.join()
+    print_progress_end()
 
-    return filtered_recipes.values()
+    # Map cell objects to values.
+    filtered_recipe_values = []
+    for row in filtered_recipes.values():
+        filtered_recipe_values.append([
+            cell.cell.input_value for cell in row
+        ])
+
+    return filtered_recipe_values
 
 def get_worksheet_name(options):
     """ Get name of writable worksheet. """
@@ -208,29 +215,6 @@ def get_worksheet_name(options):
             worksheet_name += u'-' + options.filter
 
     return worksheet_name
-
-def write_recipes(client, dst_cells, filtered_recipes):
-
-    # Prepare request that will be used to update worksheet cells.
-    batch_request = gdata.spreadsheet.SpreadsheetsCellsFeed()
-
-    # Write filtered recipes to destination worksheet.
-    cell_index = 0
-    # Each row contains recipe name and href.
-    for row in filtered_recipes:
-        # Update each destination cell.
-        for cell in row:
-            # Get destination cell.
-            dst_cell = dst_cells.entry[cell_index]
-            # Update cell value.
-            dst_cell.cell.inputValue = cell.cell.inputValue
-            # Set cell for update.
-            batch_request.AddUpdate(dst_cell)
-            # Go to next cell.
-            cell_index += 1
-
-    # Execute batch update of destination cells.
-    return client.ExecuteBatch(batch_request, dst_cells.GetBatchLink().href)
 
 def decode_options(options):
     """Decode non-ascii option values."""
@@ -267,6 +251,7 @@ def main():
         decode_options(options)
 
         # Fetch gdata client.
+        print(u'Authenticating to Google service.')
         client = get_service_client(options.auth_data)
 
         print("Retrieving recipes.")
@@ -277,19 +262,13 @@ def main():
 
         # Write recipes only when any were found.
         if filtered_recipes:
-            # Get worksheet for writing recipes.
-            dst_worksheet_name   = get_worksheet_name(options)
-            filtered_recipes_len = len(filtered_recipes)
-
-            dst_cells = get_destination_cells(
+            print("Writing %d filtered recipes." % len(filtered_recipes))
+            write_rows_to_worksheet(
                 client,
                 SPREADSHEET_TITLE,
-                dst_worksheet_name,
-                filtered_recipes_len
+                get_worksheet_name(options),
+                filtered_recipes
             )
-
-            print("Writing filtered %d recipes." % filtered_recipes_len)
-            write_recipes(client, dst_cells, filtered_recipes)
         else:
             print("No recipes found :(.")
 

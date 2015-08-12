@@ -13,7 +13,6 @@ import shutil
 import subprocess
 import cookielib
 import urllib2
-import gdata.spreadsheet.service
 from datetime import datetime
 from optparse import OptionParser
 from BeautifulSoup import BeautifulSoup
@@ -26,13 +25,14 @@ from selenium.webdriver.common.keys import Keys
 from lib.common import get_file_path, prepare_opener, open_url
 from lib.gdocs import (
     get_service_client,
-    get_destination_cells
+    write_rows_to_worksheet,
 )
 from lib.xls import make_xls
 # }}}
 
 # Lovely constants.
-OPAC_URL       = 'http://opac.ksiaznica.bielsko.pl/'
+OPAC_URL          = 'http://opac.ksiaznica.bielsko.pl/'
+WORKSHEET_HEADERS = (u'author', u'title', u'info')
 
 def browser_start():
     print(u'Starting browser.')
@@ -318,10 +318,12 @@ def get_library_status(books_list):
     return library_status
 
 def get_worksheet_name(shelf_name):
-    return datetime.today().strftime("%Y-%m-%d")
+    return '{0} {1}'.format(
+        shelf_name.capitalize().replace('-', ' '),
+        datetime.today().strftime("%Y-%m-%d")
+    )
 
 def get_books_list(file_name):
-
     file_path = get_file_path(file_name)
 
     books_list = None
@@ -332,50 +334,30 @@ def get_books_list(file_name):
 
 def write_books_to_gdata(auth_data, shelf_name, library_status):
     # Fetch gdata client.
+    print("Authenticating to Google service.")
     client = get_service_client(auth_data)
 
     # Fetch spreadsheet params.
     spreadsheet_title  = u'Karty'
-    dst_worksheet_name = get_worksheet_name(shelf_name)
-    status_entries_len = len(library_status)
 
-    writable_cells = get_destination_cells(
-        client,
-        spreadsheet_title,
-        dst_worksheet_name,
-        status_entries_len
-    )
+    books_status = [
+        [book[header] for header in WORKSHEET_HEADERS]
+        for book in library_status
+    ]
 
     print("Writing books.")
-    # Prepare request that will be used to update worksheet cells.
-    batch_request = gdata.spreadsheet.SpreadsheetsCellsFeed()
-
-    cell_index = 0
-    for book_status in library_status:
-        for key in ('author', 'title', 'info'):
-            # Fetch next cell.
-            text_cell = dst_cells.entry[cell_index]
-
-            # Update cell value.
-            text_cell.cell.inputValue = book_status[key]
-            batch_request.AddUpdate(text_cell)
-
-            # Go to next cell.
-            cell_index += 1
-
-    # Execute batch update of destination cells.
-    return client.ExecuteBatch(
-        batch_request, dst_cells.GetBatchLink().href
+    write_rows_to_worksheet(
+        client,
+        spreadsheet_title,
+        get_worksheet_name(shelf_name),
+        books_status,
     )
 
 def write_books_to_xls(shelf_name, library_status):
-    worksheet_name    = get_worksheet_name(shelf_name)
-    worksheet_headers = (u'author', u'title', u'info')
-
     return make_xls(
         shelf_name,
-        worksheet_name,
-        worksheet_headers,
+        get_worksheet_name(shelf_name),
+        WORKSHEET_HEADERS,
         library_status
     )
 

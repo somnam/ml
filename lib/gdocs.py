@@ -85,20 +85,16 @@ def get_writable_worksheet(client, spreadsheet_id, worksheet_name,
     worksheet = client.AddWorksheet(
         spreadsheet_id,
         worksheet_name,
-        # Arbitrary number of rows. Must be later adjusted to no. of hits.
         row_count,
         col_count,
     )
 
     return worksheet
 
-def get_destination_cells(client, spreadsheet_id, dst_worksheet):
-    return get_writable_cells(client, spreadsheet_id, dst_worksheet)
-
 def get_writable_cells(client, spreadsheet_id, dst_worksheet,
-                       return_empty='true', max_col=2):
+                       return_empty='true', **kwargs):
 
-    query = CellQuery(return_empty=return_empty, max_col=max_col)
+    query = CellQuery(return_empty=return_empty, **kwargs)
     return client.GetCells(spreadsheet_id, get_sheet_id(dst_worksheet), q=query)
 
 def write_to_cells(client, spreadsheet_id, dst_worksheet, dst_cells, rows):
@@ -109,32 +105,38 @@ def write_to_cells(client, spreadsheet_id, dst_worksheet, dst_cells, rows):
     cell_index = 0
     for row in rows:
         # Update each destination cell.
-        for cell in row:
+        for value in row:
             # Get destination cell.
             dst_cell = dst_cells.entry[cell_index]
             # Update cell value.
-            dst_cell.cell.input_value = cell.cell.input_value
+            dst_cell.cell.input_value = value
             # Set cell for update.
-            batch_request.AddBatchEntry(dst_cell, operation_string='update')
+            batch_request.AddBatchEntry(
+                dst_cell, operation_string='update'
+            )
             # Go to next cell.
             cell_index += 1
 
     # Execute batch update of destination cells.
     return client.batch(batch_request)
 
-def write_rows_to_worksheet(client, spreadsheet_id, worksheet_name, rows):
-    rows_len = len(rows)
+def write_rows_to_worksheet(client, spreadsheet_title, worksheet_name, rows):
+    if not rows: return
+
+    # Get worksheet id.
+    spreadsheet_id = retrieve_spreadsheet_id(client, spreadsheet_title)
 
     # Get worksheet for writing rows.
     dst_worksheet = get_writable_worksheet(
         client,
         spreadsheet_id,
         worksheet_name,
-        rows_len
+        row_count=len(rows),
+        col_count=len(rows[0])
     )
 
     # Get cells for Writing rows.
-    dst_cells = get_destination_cells(
+    dst_cells = get_writable_cells(
         client,
         spreadsheet_id,
         dst_worksheet,

@@ -72,6 +72,7 @@ def open_url(url, opener, data=None):
         if response.getcode() != 200:
             response = None
     except (
+        ValueError,
         httplib.BadStatusLine,
         urllib2.HTTPError,
         urllib2.URLError
