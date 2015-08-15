@@ -259,28 +259,6 @@ def rottentomatoes_movie_info(response):
         audience_meter_value,
     ]
 
-# def write_movie_info(client, writable_cells, movie_info):
-#     # Prepare request that will be used to update worksheet cells.
-#     batch_request = gdata.spreadsheet.SpreadsheetsCellsFeed()
-#
-#     cell_index = 0
-#     for movie in movie_info:
-#         for value in movie:
-#             # Fetch next cell.
-#             text_cell = writable_cells.entry[cell_index]
-#
-#             # Update cell value.
-#             text_cell.cell.input_value = value
-#             batch_request.AddUpdate(text_cell)
-#
-#             # Go to next cell.
-#             cell_index += 1
-#
-#     # Execute batch update of destination cells.
-#     return client.ExecuteBatch(
-#         batch_request, writable_cells.GetBatchLink().href
-#     )
-
 def make_dir_if_not_exists(dir_path):
     if not os.path.exists(dir_path):
         try:

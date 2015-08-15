@@ -11,18 +11,27 @@ import gdata.spreadsheet.service
 from filecache import filecache
 from optparse import OptionParser
 from multiprocessing.dummy import Pool, Lock, cpu_count
-from lib.common import get_parsed_url_response, get_json_file
+from lib.common import (
+    open_url,
+    prepare_opener,
+    get_parsed_url_response,
+    get_json_file,
+    print_progress,
+    print_progress_end
+)
 from lib.gdocs import (
-    get_auth_data,
-    connect_to_service,
-    retrieve_spreadsheet_id,
-    get_writable_worksheet,
-    get_writable_cells
+    get_service_client,
+    write_rows_to_worksheet,
 )
 from opac import get_books_source_file, refresh_books_list
 # }}}
 
-LOCK = Lock()
+def prepare_goodreads_opener():
+    gr_url = 'http://www.goodreads.com/'
+    opener = prepare_opener(gr_url)
+    # Request used to initialize cookie.
+    open_url(gr_url, opener)
+    return opener
 
 def get_unique_authors(books_list):
     authors = set()
@@ -35,16 +44,13 @@ def get_unique_authors(books_list):
 
 @filecache(30 * 24 * 60 * 60)
 def get_author_info(author):
-    with LOCK:
-        print('Fetching %s info.' % author)
-
     # Prepare query url.
     api_url  = 'http://www.goodreads.com/search?%s' % (
         urllib.urlencode({ 'q': re.sub(r'\s+', '+', author) })
     )
 
     # Query site for author.
-    response = get_parsed_url_response(api_url)
+    response = get_parsed_url_response(api_url, opener=OPENER)
 
     info_url = None
     if response:
@@ -65,16 +71,18 @@ def get_author_info(author):
 
     birth_place = None
     if info_url:
-        response = get_parsed_url_response(info_url)
+        response = get_parsed_url_response(info_url, opener=OPENER)
         if response:
             birth_place = response.first('div', text=u'born')
             if birth_place:
                 # Striptease.
                 birth_place = birth_place.next.strip().split(',').pop().strip().replace('in ', '')
-        response.decompose()
+            response.decompose()
 
+    with LOCK:
+        print_progress()
 
-    return (author, birth_place)
+    return [author, birth_place]
 
 def get_authors_info(books_list):
     # Get unique authors.
@@ -96,6 +104,8 @@ def get_authors_info(books_list):
     # Wait until all threads finish.
     pool.join()
 
+    print_progress_end()
+
     return authors_info
 
 def map_authors_by_country(authors_info):
@@ -109,33 +119,17 @@ def map_authors_by_country(authors_info):
 
     return authors_by_country
 
-def write_countries(client, dst_cells, countries_map):
-    # Prepare request that will be used to update worksheet cells.
-    batch_request = gdata.spreadsheet.SpreadsheetsCellsFeed()
-
-    # Sort countries.
-    countries  = countries_map.keys()
+def prepare_contry_rows(countries_map):
+    # Sort countries
+    countries = countries_map.keys()
     countries.sort()
-
-    cell_index = 0
-    for country in countries:
-        country_authors = "\n".join(countries_map[country])
-
-        for value in (country, country_authors):
-            # Fetch next cell.
-            text_cell = dst_cells.entry[cell_index]
-
-            # Update cell value.
-            text_cell.cell.inputValue = value
-            batch_request.AddUpdate(text_cell)
-
-            # Go to next cell.
-            cell_index += 1
-
-    # Execute batch update of destination cells.
-    return client.ExecuteBatch(
-        batch_request, dst_cells.GetBatchLink().href
-    )
+    return [
+        [
+            country.decode('utf-8'), 
+            "\n".join(countries_map[country]).decode('utf-8')
+        ]
+        for country in countries
+    ]
 
 def main():
     # Cmd options parser
@@ -162,40 +156,26 @@ def main():
         books_list = get_json_file(books_source)
 
         # Fetch author info for each book.
-        authors_info = get_authors_info(books_list)
+        authors_info   = get_authors_info(books_list)
+        # Map authors by countries.
+        countries_map  = map_authors_by_country(authors_info)
+        # Prepare data for worksheet.
+        countries_rows = prepare_contry_rows(countries_map)
 
-        countries_map = map_authors_by_country(authors_info)
-        countries_len = len(countries_map.keys())
-
-        # Drive connecton boilerplate.
         print("Authenticating to Google service.")
-        auth_data = get_auth_data(options.auth_data)
-        client    = connect_to_service(auth_data)
-
-        # Fetch spreadsheet id.
-        spreadsheet_title = u'Karty'
-        ssid              = retrieve_spreadsheet_id(client, spreadsheet_title)
-
-        # Destination worksheet boilerplate.
-        dst_name      = (options.destination or u'Krajoliteratura')
-        print(u"Fetching destination worksheet '%s'." % dst_name)
-        dst_worksheet = get_writable_worksheet(
-            client,
-            dst_name,
-            ssid,
-            row_count=countries_len,
-        )
-
-        print("Fetching destination cells.")
-        writable_cells = get_writable_cells(
-            client,
-            dst_worksheet,
-            ssid,
-            max_row=countries_len
-        )
+        client = get_service_client(options.auth_data)
 
         print("Writing authors.")
-        write_countries(client, writable_cells, countries_map)
+        spreadsheet_title = u'Karty'
+        dst_name          = (options.destination or u'Krajoliteratura')
+        write_rows_to_worksheet(
+            client,
+            spreadsheet_title,
+            dst_name,
+            countries_rows,
+        )
 
 if __name__ == "__main__":
+    LOCK   = Lock()
+    OPENER = prepare_goodreads_opener()
     main()
