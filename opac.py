@@ -33,34 +33,40 @@ def get_library_status(books_list, library):
     if not books_list:
         return
 
-    # Get browser.
-    browser = browser_start()
-
     # Get library instance.
     library_class = 'n{0}'.format(library)
     library       = getattr(lib.libraries, library_class)()
 
-    # Load opac site.
-    browser_load_library(browser, library)
-
-    # Will contains books info.
-    library_status = []
-
-    # Default value for request timeout.
+    # Set timeout for request.
     socket_timeout = 10.0
+    socket.setdefaulttimeout(socket_timeout)
 
+    # Will contain books info.
+    library_status, browser = [], None
     for book in books_list:
-        book_info = None
+        # Start browser if required.
+        retry_start_browser = 2
+        while not browser and retry_start_browser:
+            try:
+                browser = browser_start()
+                browser_load_library(browser, library)
+            except socket.timeout:
+                print(u'Browser restart failed.')
+            finally:
+                retry_start_browser -= 1
+                if retry_start_browser:
+                    print(u'Retry starting browser')
+
+        # Check if browser started succsessfully.
+        if not browser: continue
 
         # Retry when fetching book info
         # (usually triggered by browser hang).
-        retry = 2
-        while not book_info and retry:
-            # Set timeout for request.
-            socket.setdefaulttimeout(socket_timeout)
-
+        book_info        = None
+        retry_book_fetch = 2
+        while not book_info and retry_book_fetch:
             # Search first by isbn, then by title.
-            search_field = 'title' if retry % 2 else 'isbn'
+            search_field = 'title' if retry_book_fetch % 2 else 'isbn'
 
             # Try fetching book info.
             try:
@@ -70,26 +76,22 @@ def get_library_status(books_list, library):
                 book_info = library.get_book_info(
                     browser, book, search_field
                 )
+
+                library.post_process(browser)
             except socket.timeout:
                 print(u'Querying book info timed out.')
-                # Restart browser.
                 browser_timeout(browser)
-                browser = browser_start()
-                browser_load_library(browser, library)
-            finally:
-                library.post_process(browser)
-                # Restore default timeout value.
-                socket.setdefaulttimeout(None)
+                browser = None
 
             # Append book info if present.
             if book_info:
                 print(u'Succsessfully queried book info.')
                 break
             else:
-                # Retry?
-                retry -= 1
-                if retry:
-                    print(u'Retrying ...')
+                # retry_book_fetch?
+                retry_book_fetch -= 1
+                if retry_book_fetch:
+                    print(u'Retry book fetching')
             # Sleep for short time to avoid too frequent requests.
             time.sleep(1.0)
 
@@ -101,6 +103,9 @@ def get_library_status(books_list, library):
         })
 
     browser_stop(browser)
+
+    # Restore default timeout value.
+    socket.setdefaulttimeout(None)
 
     return library_status
 
