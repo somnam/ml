@@ -3,7 +3,6 @@
 
 # Import {{{
 import re
-import urllib2
 # import time
 from operator import itemgetter
 from multiprocessing.dummy import Pool, cpu_count
@@ -53,7 +52,7 @@ def get_profile_name(profile_id):
             { 'class': re.compile('profile-header') }
         )
         if profile_header:
-            profile_name = profile_header.find('h5', { 'class': 'title' }).contents[0]
+            profile_name = profile_header.find('h5', { 'class': 'title' }).text
             profile_name = profile_name.replace(u'\xa0', u' ').strip()
         profile_page.decompose()
 

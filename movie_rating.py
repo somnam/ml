@@ -47,7 +47,7 @@ def extract_tokens(dirname):
     return movies_list
 
 def extract_info(movie_title):
-    info = [movie_title] \
+    info = [movie_title.decode('utf-8')] \
          + rottentomatoes_info(movie_title) \
          + imdb_info(movie_title)
 
