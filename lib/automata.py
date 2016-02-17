@@ -5,7 +5,13 @@ import os
 import time
 import shutil
 from selenium import webdriver
-from selenium.webdriver.support.ui import Select
+from selenium.common.exceptions import TimeoutException
+from selenium.webdriver.common.by import By
+from selenium.webdriver.support import expected_conditions
+from selenium.webdriver.support.ui import (
+    Select,
+    WebDriverWait,
+)
 # }}}
 
 def browser_start():
@@ -50,10 +56,24 @@ def browser_select_by_id_and_value(browser, select_id, select_value):
     select.select_by_value(select_value)
     return select
 
-def browser_click(browser, elem):
-    webdriver.ActionChains(browser).move_to_element(elem) \
-                                   .click(elem) \
-                                   .perform()
-    return
+def wait_is_visible(browser, locator, timeout=5):
+    try:
+        WebDriverWait(browser, timeout).until(
+            expected_conditions.visibility_of_element_located(
+                (By.ID, locator)
+            )
+        )
+        return True
+    except TimeoutException:
+        return False
 
-
+def wait_is_not_visible(browser, locator, timeout=5):
+    try:
+        WebDriverWait(browser, timeout).until_not(
+            expected_conditions.visibility_of_element_located(
+                (By.ID, locator)
+            )
+        )
+        return True
+    except TimeoutException:
+        return False

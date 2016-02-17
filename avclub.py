@@ -5,7 +5,7 @@
 import re
 from operator import itemgetter
 from filecache import filecache
-from multiprocessing.dummy import Pool, cpu_count, Lock
+from multiprocessing.dummy import Pool, cpu_count
 from optparse import OptionParser
 from lib.common import (
     get_file_path,
@@ -17,8 +17,6 @@ from lib.common import (
     print_progress_end
 )
 # }}}
-
-LOCK = Lock()
 
 def map_category_name(category):
     category_name_to_url = {
@@ -75,8 +73,6 @@ def scrap_article_entry(article):
     heading      = article.find('h1', { 'class': 'heading' }).find('a')
     article_info = scrap_article_info(heading['href']) if heading else None
 
-    with LOCK: print_progress()
-
     return article_info
 
 def scrap_category_reviews(input_category, last_page):
@@ -124,6 +120,7 @@ def scrap_category_reviews(input_category, last_page):
         response.decompose()
 
         # Go to next page.
+        print_progress()
         page_index += 1
 
         # Limit reviews scraping to given first pages.

@@ -13,7 +13,7 @@ from datetime import datetime
 from optparse import OptionParser
 
 import lib.libraries
-from lib.common import get_file_path
+from lib.common import get_file_path, get_json_file
 from lib.gdocs import (
     get_service_client,
     write_rows_to_worksheet,
@@ -179,14 +179,25 @@ def refresh_books_list(source):
     ])
 
 def main():
+    # Fetch library data.
+    libraries_data = get_json_file('opac.json')
+
     # Cmd options parser
     option_parser = OptionParser()
 
     # Add options
     option_parser.add_option("-r", "--refresh", action="store_true")
-    option_parser.add_option("-s", "--source")
     option_parser.add_option("-a", "--auth-data")
-    option_parser.add_option("-l", "--library", type='choice', choices=['4949','5004'])
+
+    # Add library option.
+    library_choices = libraries_data.keys()
+    option_parser.add_option(
+        "-l",
+        "--library",
+        type='choice',
+        choices=library_choices,
+        help="Choose one of {0}".format("|".join(library_choices)),
+    )
 
     (options, args) = option_parser.parse_args()
 
@@ -195,8 +206,9 @@ def main():
         option_parser.print_help()
         exit(-1)
 
-    shelf_name   = 'polowanie-biblioteczne'
-    books_source = (options.source or shelf_name)
+    # Get source file for library.
+    library_data = libraries_data[options.library]
+    books_source = library_data['source']
 
     if options.refresh:
         print(u'Updating list of books from source "%s".' % books_source)
@@ -220,11 +232,11 @@ def main():
     # Write books status.
     if options.auth_data:
         write_books_to_gdata(
-            options.auth_data, shelf_name, library_status
+            options.auth_data, books_source, library_status
         )
     else:
         write_books_to_xls(
-            shelf_name, library_status
+            books_source, library_status
         )
 
 if __name__ == "__main__":

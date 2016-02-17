@@ -6,17 +6,21 @@ import re
 import time
 import urllib2
 from BeautifulSoup import BeautifulSoup
-from lib.common import prepare_opener, open_url
+from lib.common import prepare_opener, open_url, get_json_file
 from lib.automata import (
-    browser_click,
     browser_select_by_id_and_value,
+    wait_is_visible,
+    wait_is_not_visible,
 )
 from selenium.common.exceptions import NoSuchElementException
+from selenium.webdriver.common.keys import Keys
 # }}}
 
+LIBRARIES_DATA = get_json_file('opac.json')
+
 class n4949(object):
-    url   = 'http://opac.ksiaznica.bielsko.pl/'
-    title = 'Opac'
+    url   = LIBRARIES_DATA['4949']['url']
+    title = LIBRARIES_DATA['4949']['title']
 
     def __init__(self):
         self.opener = prepare_opener(n4949.url)
@@ -52,7 +56,14 @@ class n4949(object):
             search_type, resource_type = '2', '2'
 
         # Input search value.
-        browser.find_element_by_id('form1:textField1').send_keys(search_value)
+        text_field = browser.find_element_by_id('form1:textField1')
+        text_field.send_keys(search_value)
+
+        # Hide autocomplete popup.
+        autocomplete_popup = 'autoc1'
+        wait_is_visible(browser, autocomplete_popup)
+        text_field.send_keys(Keys.ESCAPE)
+        wait_is_not_visible(browser, autocomplete_popup)
 
         # Set search type.
         browser_select_by_id_and_value(browser, 'form1:dropdown1', search_type)
@@ -63,7 +74,7 @@ class n4949(object):
         # Submit form.
         print(u'Submitting form.')
         submit = browser.find_element_by_id('form1:btnSzukajIndeks')
-        browser_click(browser, submit)
+        submit.click()
 
         # Wait for results to appear.
         results         = None
@@ -92,7 +103,7 @@ class n4949(object):
         for elem in results:
             if elem.text.lstrip().replace(replace_from, '') == match_value:
                 print(u'Found match.')
-                browser_click(browser, elem)
+                elem.click()
                 match = elem.find_element_by_xpath('..') \
                             .find_element_by_class_name('zawartosc') \
                             .find_element_by_tag_name('a')
@@ -179,8 +190,8 @@ class n4949(object):
         return info
 
 class n5004(object):
-    url   = 'http://katalog.rajska.info/'
-    title = None
+    url   = LIBRARIES_DATA['5004']['url']
+    title = LIBRARIES_DATA['5004']['title']
 
     def pre_process(self, browser):
         pass
@@ -188,7 +199,7 @@ class n5004(object):
     def post_process(self, browser):
         button = browser.find_element_by_id('logo_content')
         link   = button.find_element_by_tag_name('a')
-        browser_click(browser, link)
+        link.click()
 
     def set_search_type_and_value(self, browser, type_name, type_value, search_name, search_value):
         # Set search type.
@@ -209,7 +220,7 @@ class n5004(object):
 
         # Submit form.
         submit = browser.find_element_by_id('search')
-        browser_click(browser, submit)
+        submit.click()
 
         # Search for results in table.
         results = None
@@ -251,7 +262,7 @@ class n5004(object):
         if not match: return
 
         # Click book link
-        browser_click(browser, match)
+        match.click()
 
         # Search for book info.
         info_table = None
@@ -283,10 +294,8 @@ class n5004(object):
             return
 
         # Query book and fetch results.
-        results = self.query_book(
-            browser, book, search_field
-        )
-        match = self.get_matching_result(
+        results = self.query_book(browser, book, search_field)
+        match   = self.get_matching_result(
             browser, book, search_field, results
         )
         info    = self.extract_book_info(browser, book, match)
