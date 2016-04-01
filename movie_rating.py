@@ -28,7 +28,6 @@ from lib.gdocs import (
 from lib.xls import make_xls
 # }}}
 
-LOCK    = Lock()
 FILTERS = get_json_file('movie_rating.json')
 
 def extract_tokens(dirname):
@@ -100,6 +99,8 @@ def prepare_imdb_opener():
 # Invalidate values after 30 days.
 @filecache(30 * 24 * 60 * 60)
 def imdb_info(movie_title, opener=prepare_imdb_opener()):
+    empty_value = ['']*5
+
     # http://www.imdb.com/find?q=
     site_url   = 'http://www.imdb.com'
     search_url = '%s/find' % site_url
@@ -108,92 +109,89 @@ def imdb_info(movie_title, opener=prepare_imdb_opener()):
         data=urllib.urlencode({ 'q': movie_title }),
         opener=opener
     )
+    if not response: return empty_value
 
-    info = None
-    if response:
-        class_re = re.compile('findResult')
-        res_row  = response.first('tr', { 'class': class_re })
-        if res_row:
-            href_suffix = res_row.first('a')['href'] if res_row.first('a') else None
-            if href_suffix:
-                movie_url  = '%s/%s' % (site_url, href_suffix)
-                movie_page = get_parsed_url_response(movie_url, opener=opener)
-                if movie_page:
-                    movie_overview = movie_page.find(
-                        'td',
-                        { 'id': 'overview-top' }
-                    )
-
-                    movie_details = movie_overview.find(
-                        'div', 
-                        { 'class': 'star-box-details' }
-                    )
-
-                    imdb_rating_value, metacritic_rating_value = '', ''
-                    if movie_details:
-                        imdb_rating = movie_details.find(
-                            'span', 
-                            { 'itemprop': 'ratingValue' }
-                        )
-                        if imdb_rating:
-                            # imdb_rating_value = '%s/10' % imdb_rating.string
-                            imdb_rating_value = normalize_rating(
-                                imdb_rating.string
-                            )
-
-                        metacritic_re = re.compile('Metacritic.com')
-                        metacritic_rating = movie_details.find(
-                            'a',
-                            { 'title': metacritic_re }
-                        )
-                        if metacritic_rating:
-                            metacritic_rating_value = normalize_rating(
-                                metacritic_rating.string
-                            )
-
-                    movie_infobar = movie_overview.find(
-                        'div',
-                        { 'class': 'infobar' }
-                    )
-                    movie_duration_value, movie_genre_value = '', ''
-                    if movie_infobar:
-                        movie_duration = movie_infobar.find(
-                            'time',
-                            { 'itemprop': 'duration' }
-                        )
-                        if movie_duration:
-                            movie_duration_value \
-                                = movie_duration.string.replace('min', '').strip()
-
-                        movie_genres = movie_infobar.findAll(
-                            'span',
-                            { 'itemprop': 'genre' }
-                        )
-                        movie_genre_value = ', '.join([
-                            genre.string for genre in movie_genres
-                        ])
-
-                    movie_description = movie_overview.find(
-                        'p',
-                        { 'itemprop': 'description' }
-                    )
-                    movie_description_value = ''
-                    if movie_description:
-                        movie_description_value = movie_description.text
-
-                    info = [
-                        imdb_rating_value, 
-                        metacritic_rating_value,
-                        movie_duration_value,
-                        movie_genre_value,
-                        movie_description_value,
-                    ]
-
-                    movie_page.decompose()
-
+    class_re = re.compile('findResult')
+    res_row  = response.first('tr', { 'class': class_re })
+    if not res_row:
         response.decompose()
+        return empty_value
 
-    return info if info else ['']*5
+    href_suffix = res_row.first('a')['href'] if res_row.first('a') else None
+    if not href_suffix: return empty_value
+
+    movie_url  = '%s/%s' % (site_url, href_suffix)
+    movie_page = get_parsed_url_response(movie_url, opener=opener)
+    if not movie_page: return empty_value
+
+    movie_overview = movie_page.find('td', { 'id': 'overview-top' })
+    if not movie_overview:
+        movie_page.decompose()
+        return empty_value
+
+    movie_details     = movie_overview.find('div', { 'class': 'star-box-details' })
+    movie_infobar     = movie_overview.find('div', { 'class': 'infobar' })
+    movie_description = movie_overview.find('p', { 'itemprop': 'description' })
+
+    # ...
+    imdb_rating_value, metacritic_rating_value = '', ''
+    if movie_details:
+        imdb_rating = movie_details.find(
+            'span', 
+            { 'itemprop': 'ratingValue' }
+        )
+        if imdb_rating:
+            # imdb_rating_value = '%s/10' % imdb_rating.string
+            imdb_rating_value = normalize_rating(
+                imdb_rating.string
+            )
+
+        metacritic_re = re.compile('Metacritic.com')
+        metacritic_rating = movie_details.find(
+            'a',
+            { 'title': metacritic_re }
+        )
+        if metacritic_rating:
+            metacritic_rating_value = normalize_rating(
+                metacritic_rating.string
+            )
+
+    # ...
+    movie_duration_value, movie_genre_value = '', ''
+    if movie_infobar:
+        movie_duration = movie_infobar.find(
+            'time',
+            { 'itemprop': 'duration' }
+        )
+        if movie_duration:
+            movie_duration_value \
+                = movie_duration.string.replace('min', '').strip()
+
+        movie_genres = movie_infobar.findAll(
+            'span',
+            { 'itemprop': 'genre' }
+        )
+        movie_genre_value = ', '.join([
+            genre.string for genre in movie_genres
+        ])
+
+    # ...
+    movie_description_value = ''
+    if movie_description:
+        movie_description_value = movie_description.text
+
+    info = [
+        imdb_rating_value, 
+        metacritic_rating_value,
+        movie_duration_value,
+        movie_genre_value,
+        movie_description_value,
+    ]
+
+    movie_page.decompose()
+    response.decompose()
+
+    return info
 
 def prepare_rotten_opener():
     return prepare_site_opener('http://www.rottentomatoes.com/')
