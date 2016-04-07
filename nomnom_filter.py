@@ -26,8 +26,9 @@ from lib.gdocs import (
 )
 
 SPREADSHEET_TITLE = u'Lista'
+STDIN_ENC         = sys.stdin.encoding
 
-def retrieve_recipe_cells(client):
+def retrieve_recipe_cells(client, selected_only):
     if not client:
         return
 
@@ -35,9 +36,17 @@ def retrieve_recipe_cells(client):
     spreadsheet_id = retrieve_spreadsheet_id(client, SPREADSHEET_TITLE)
     work_feed      = client.GetWorksheets(spreadsheet_id)
 
+    # Filter worksheets if selected only option was given.
+    worksheets = work_feed.entry
+    if selected_only:
+        worksheets = filter(
+            lambda sheet: sheet.title.text in selected_only,
+            worksheets
+        )
+
+    # Fetch worksheet cells.
     recipe_cells = []
-    for worksheet in work_feed.entry:
-        # Fetch worksheet cells.
+    for worksheet in worksheets:
         print_progress()
         cells = get_writable_cells(
             client, spreadsheet_id, worksheet, max_col=2
@@ -89,7 +98,8 @@ def filter_nomnom_page(recipe_url_value, contains_re, filter_re):
     recipe_page = get_nomnom_page(recipe_url_value)
     if recipe_page:
         # Check page content with given filters.
-        if filter_recipe(zlib.decompress(recipe_page), contains_re, filter_re):
+        decompressed_page = zlib.decompress(recipe_page).decode(STDIN_ENC)
+        if filter_recipe(decompressed_page, contains_re, filter_re):
             filtered_recipe = True
 
     return filtered_recipe
@@ -98,7 +108,7 @@ def filter_nomnom_page(recipe_url_value, contains_re, filter_re):
 @filecache(30 * 24 * 60 * 60)
 def get_nomnom_page(recipe_url):
     # Get BeautifulSoup page instance.
-    parser = get_parsed_url_response(recipe_url)
+    parser = get_parsed_url_response(recipe_url, verbose=False)
 
     page = None
     if parser and parser.find('body'):
@@ -136,10 +146,21 @@ def get_nomnom_page(recipe_url):
     return page
 
 def filter_recipe(recipe_page, contains_re, filter_re):
-    return (
-        (contains_re and re.search(contains_re, recipe_page, re.UNICODE)) or
-        (filter_re and not re.search(filter_re, recipe_page, re.UNICODE))
-    )
+    result = False
+
+    if contains_re and not filter_re:
+        result = re.search(contains_re, recipe_page, re.UNICODE)
+
+    if filter_re and not contains_re:
+        result = not re.search(filter_re, recipe_page, re.UNICODE)
+
+    if contains_re and filter_re:
+        result = (
+            re.search(contains_re, recipe_page, re.UNICODE) and
+            not re.search(filter_re, recipe_page, re.UNICODE)
+        )
+
+    return result
 
 def get_step_end_index(rows_len, step, i):
     return (i+step) if (i+step) < rows_len else rows_len
@@ -217,15 +238,19 @@ def get_worksheet_name(options):
     return worksheet_name
 
 def decode_options(options):
-    """Decode non-ascii option values."""
+    """Hack to decode non-ascii option values."""
 
-    # Used to decode options.
-    stdin_enc = sys.stdin.encoding
 
-    options.contains, options.filter, options.worksheet = (
-        options.contains.decode(stdin_enc) if options.contains else None,
-        options.filter.decode(stdin_enc) if options.filter else None,
-        options.worksheet.decode(stdin_enc) if options.worksheet else None
+    # 'options' is a Values instance, how to assign to it using a loop?
+    (options.contains,
+     options.filter,
+     options.worksheet,
+     options.selected_only
+    ) = (
+        options.contains.decode(STDIN_ENC) if options.contains else None,
+        options.filter.decode(STDIN_ENC) if options.filter else None,
+        options.worksheet.decode(STDIN_ENC) if options.worksheet else None,
+        options.selected_only.decode(STDIN_ENC) if options.selected_only else None
     )
 
     return
@@ -237,6 +262,7 @@ def main():
     option_parser.add_option("-a", "--auth-data")
     option_parser.add_option("-c", "--contains")
     option_parser.add_option("-f", "--filter")
+    option_parser.add_option("-s", "--selected-only")
     option_parser.add_option("-w", "--worksheet")
 
     (options, args) = option_parser.parse_args()
@@ -255,7 +281,9 @@ def main():
         client = get_service_client(options.auth_data)
 
         print("Retrieving recipes.")
-        recipe_cells = retrieve_recipe_cells(client)
+        recipe_cells = retrieve_recipe_cells(
+            client, options.selected_only.split(',')
+        )
 
         print("Filtering recipes.")
         filtered_recipes = filter_recipe_cells(recipe_cells, options)

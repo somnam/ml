@@ -63,7 +63,7 @@ def prepare_opener(url, headers=None, data=None):
 
     return opener
 
-def open_url(url, opener, data=None):
+def open_url(url, opener, data=None, verbose=True):
     request = urllib2.Request(url, data=data)
 
     response = None
@@ -77,18 +77,19 @@ def open_url(url, opener, data=None):
         urllib2.HTTPError,
         urllib2.URLError
     ) as e:
-        print "Could not fetch url '%s'. Error: %s." % (url, e)
+        if verbose:
+            print "Could not fetch url '%s'. Error: %s." % (url, e)
 
     return response
 
-def get_url_response(url, headers=None, data=None, opener=None):
+def get_url_response(url, headers=None, data=None, opener=None, verbose=True):
     """Send request to given url and ask for response."""
 
     opener = (opener or prepare_opener(url, headers=headers))
 
-    return open_url(url, opener, data)
+    return open_url(url, opener, data, verbose=verbose)
 
-def parse_url_response(response):
+def parse_url_response(response, verbose=True):
     # Parse html response (if available)
     parser = None
     if response:
@@ -98,15 +99,19 @@ def parse_url_response(response):
                 convertEntities=BeautifulSoup.HTML_ENTITIES
             )
         except TypeError:
-            print(u'Error fetching response for url "%s".' % url)
+            if verbose:
+                print(u'Error fetching response for url "%s".' % url)
 
     return parser
 
-def get_parsed_url_response(url, data=None, opener=None):
+def get_parsed_url_response(url, data=None, opener=None, verbose=True):
     """Send request to given url and return parsed HTML response."""
 
     # Fetch url response object
-    return parse_url_response(get_url_response(url, data=data, opener=opener))
+    return parse_url_response(
+        get_url_response(url, data=data, opener=opener, verbose=verbose),
+        verbose=verbose
+    )
 
 
 def print_progress():
