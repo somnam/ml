@@ -102,11 +102,16 @@ class n4949(object):
         match = None
         for elem in results:
             if elem.text.lstrip().replace(replace_from, '') == match_value:
-                print(u'Found match.')
                 elem.click()
-                match = elem.find_element_by_xpath('..') \
-                            .find_element_by_class_name('zawartosc') \
-                            .find_element_by_tag_name('a')
+                content = elem.find_element_by_xpath('..') \
+                              .find_element_by_class_name('zawartosc')
+
+                try:
+                    match = content.find_element_by_tag_name('a')
+                    print(u'Found match.')
+                except NoSuchElementException:
+                    pass
+
                 break
 
         if not match:

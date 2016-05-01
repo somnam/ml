@@ -281,8 +281,11 @@ def main():
         client = get_service_client(options.auth_data)
 
         print("Retrieving recipes.")
-        recipe_cells = retrieve_recipe_cells(
-            client, options.selected_only.split(',')
+        selected_only = (options.selected_only.split(',')
+                         if options.selected_only
+                         else None)
+        recipe_cells  = retrieve_recipe_cells(
+            client, selected_only
         )
 
         print("Filtering recipes.")
