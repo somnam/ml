@@ -23,40 +23,94 @@ from lib.xls import make_xls
 
 WORKSHEET_HEADERS = (u'author', u'title', u'isbn')
 
+def global_reading_list_80_books(): # {{{
+    url = (
+        'http://bookriot.com/2016/04/28/'
+        'around-world-80-books-global-reading-list/'
+    )
+
+    content_attrs = { 'itemprop': 'articleBody' }
+
+    def books_generator(paragraphs):
+        author_pre_re   = re.compile('(?:^.*\W*by\s+)|(?:\:.*$)')
+        country_post_re = re.compile(u'\s\u2013\xa0$')
+        for paragraph in paragraphs:
+            # Get first 'em' element in paragraph.
+            if not paragraph.em: continue
+
+            book_tag     = paragraph.em.a
+            book_country = (paragraph.contents[1]
+                            if paragraph.img 
+                            else paragraph.contents[0])
+            book_author  = paragraph.findAll('strong')[-1].contents[-1]
+
+            book = {
+                'title':   book_tag.text,
+                'country': country_post_re.sub('', book_country),
+                'author':  author_pre_re.sub('', book_author),
+                'href':    (paragraph.a['href']
+                            if paragraph.a.has_key('href')
+                            else None),
+            }
+
+            yield(book)
+
+    worksheet_name = u'80 books'
+
+    return maybe_fetch_books_info(
+        url, content_attrs, books_generator, worksheet_name
+    )
+# }}}
+
 def ted_recommendations(): # {{{
-    print('Fetching books list')
     url = (
         'http://ideas.ted.com/'
         'your-holiday-reading-list-58-books-recommended-by-ted-speakers/'
     )
+
+    content_attrs = { 'class': 'article-content' }
+
+    def books_generator(paragraphs):
+        author_pre_re = re.compile('^.+by\s+')
+        for paragraph in paragraphs:
+            # Get first 'em' element in paragraph.
+            if not paragraph.em: continue
+
+            book_tag    = (paragraph.em.b or paragraph.em.a)
+            book_author = paragraph.contents[1]
+
+            book = {
+                'title':  book_tag.text,
+                'author': author_pre_re.sub('', book_author),
+                'href':   (paragraph.a['href']
+                           if paragraph.a.has_key('href')
+                           else None),
+            }
+            yield(book)
+
+    worksheet_name = u'Ted recommendations'
+
+    return maybe_fetch_books_info(
+        url, content_attrs, books_generator, worksheet_name
+    )
+# }}}
+
+def maybe_fetch_books_info(url, content_attrs, books_generator, worksheet_name): # {{{
+    print('Fetching books list')
     tx_response = get_parsed_url_response(url)
 
     books = []
     if not tx_response: return books
 
-    content = tx_response.find('div', { 'class': 'article-content' })
+    content = tx_response.find('div', content_attrs)
     if not content:
         tx_response.decompose()
         return books
 
-    author_pre_re = re.compile('^.+by\s+')
-
     print('Extracting books info')
-    paragraphs = content.findAll('p')
-    for paragraph in paragraphs:
-        # Get first 'em' element in paragraph.
-        if not paragraph.em: continue
-
-        book_tag    = (paragraph.em.b or paragraph.em.a)
-        book_author = author_pre_re.sub('', paragraph.contents[1])
-        # Fetch book isbn from site.
-        book_isbn   = _get_tx_book_isbn(paragraph.a['href'])
-
-        book = {
-            'title':  book_tag.text,
-            'author': book_author,
-            'isbn':   book_isbn,
-        }
+    for book in (books_generator(content.findAll('p'))):
+        if book.has_key('href'):
+            book['isbn'] = _get_tx_book_isbn(book['href'])
 
         books.append(book)
         print_progress()
@@ -68,7 +122,7 @@ def ted_recommendations(): # {{{
     books_pl_info = get_gr_books_pl_info(books)
     print_progress_end()
 
-    return (books_pl_info, u'Ted recommendations')
+    return (books_pl_info, worksheet_name)
 # }}}
 
 # Invalidate values after 30 days.
@@ -106,7 +160,7 @@ def _get_tx_book_isbn(book_url):
     return isbn_value
 
 def process_page():
-    return ted_recommendations()
+    return global_reading_list_80_books()
 
 def main():
     # Cmd options parser
@@ -118,7 +172,7 @@ def main():
     (options, args) = option_parser.parse_args()
 
     # Fetch books entries to iterate over.
-    books_list, shelf_name = process_page()
+    books_list, worksheet_name = process_page()
     if not books_list: return
 
     # Write results to given format.
@@ -127,7 +181,7 @@ def main():
         write_rows_to_worksheet(
             get_service_client(options.auth_data),
             u'Karty',
-            shelf_name,
+            worksheet_name,
             [
                 [book[header] for header in WORKSHEET_HEADERS]
                 for book in books_list
@@ -136,7 +190,7 @@ def main():
     else:
         make_xls(
             'book_import',
-            shelf_name,
+            worksheet_name,
             WORKSHEET_HEADERS,
             books_list
         )
