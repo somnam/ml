@@ -5,9 +5,8 @@
 import sys
 from gdata.spreadsheets.client import SpreadsheetsClient, SpreadsheetQuery, CellQuery
 from gdata.spreadsheets.data import BuildBatchCellsUpdate
-from oauth2client.client import SignedJwtAssertionCredentials
+from oauth2client.service_account import ServiceAccountCredentials
 from httplib2 import Http
-from lib.common import get_json_file
 # }}}
 
 class TokenFromOAuth2Creds:
@@ -22,16 +21,13 @@ class TokenFromOAuth2Creds:
             self.creds.refresh(Http())
         self.creds.apply(reqest.headers)
 
-def get_auth_data(file_name):
-    return get_json_file(file_name)
-
-def connect_to_service(auth_data):
-    if not auth_data:
+def connect_to_service(auth_file):
+    if not auth_file:
         return
 
     scope       = ['https://spreadsheets.google.com/feeds']
-    credentials = SignedJwtAssertionCredentials(
-        auth_data['client_email'], auth_data['private_key'], scope
+    credentials = ServiceAccountCredentials.from_json_keyfile_name(
+        auth_file, scope
     )
     client      = SpreadsheetsClient(
         auth_token=TokenFromOAuth2Creds(credentials)
@@ -40,11 +36,8 @@ def connect_to_service(auth_data):
     return client
 
 def get_service_client(auth_file):
-    # Read auth data from input file.
-    auth_data = get_auth_data(auth_file)
-
     # Connect to spreadsheet service.
-    return connect_to_service(auth_data)
+    return connect_to_service(auth_file)
 
 def get_sheet_id(sheet):
     return sheet.id.text.rsplit('/', 1)[-1] if sheet else None

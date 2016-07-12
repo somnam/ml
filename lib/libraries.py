@@ -206,22 +206,33 @@ class n5004(object):
         link   = button.find_element_by_tag_name('a')
         link.click()
 
-    def set_search_type_and_value(self, browser, type_name, type_value, search_name, search_value):
-        # Set search type.
-        browser_select_by_id_and_value(browser, type_name, type_value)
-        # Input search value.
-        browser.find_element_by_id(search_name).send_keys(search_value)
+    def set_search_type_and_value(self, browser, type_id, type_value, search_id, search_value):
+        can_search = (
+            wait_is_visible(browser, type_id) and
+            wait_is_visible(browser, search_id)
+        )
+
+        if can_search:
+            # Set search type.
+            browser_select_by_id_and_value(browser, type_id, type_value)
+            # Input search value.
+            browser.find_element_by_id(search_id).send_keys(search_value)
+
+        return can_search
 
     def query_book(self, browser, book, search_field):
         search_value = book[search_field]
         type_value   = 'm21isn' if search_field == 'isbn' else 'nowy'
-        self.set_search_type_and_value(
+        can_search   = self.set_search_type_and_value(
             browser, 'IdSzIdx1', type_value, 'IdTxtSz1', search_value
         )
         if search_field != 'isbn':
-            self.set_search_type_and_value(
+            can_search = self.set_search_type_and_value(
                 browser, 'IdSzIdx2', 'if100a', 'IdTxtSz2', book['author']
             )
+
+        # Search fields didn't load properly - can't run query.
+        if not can_search: return None
 
         # Submit form.
         submit = browser.find_element_by_id('search')
@@ -232,9 +243,7 @@ class n5004(object):
         try:
             browser.find_element_by_class_name('emptyRecord')
         except NoSuchElementException:
-            results = browser.find_elements_by_class_name(
-                'opisokladka'
-            );
+            results = browser.find_elements_by_class_name('opisokladka');
 
         return results
 

@@ -4,21 +4,24 @@
 import os
 import time
 import shutil
+from lib.common import get_file_path
 from selenium import webdriver
-from selenium.common.exceptions import TimeoutException
+from selenium.common.exceptions import TimeoutException, NoSuchElementException
 from selenium.webdriver.common.by import By
 from selenium.webdriver.support import expected_conditions
 from selenium.webdriver.support.ui import (
     Select,
     WebDriverWait,
 )
+from selenium.webdriver.firefox.firefox_binary import FirefoxBinary
 # }}}
 
 def browser_start():
     print(u'Starting browser.')
 
     # Load webdriver.
-    browser = webdriver.Firefox()
+    binary  = FirefoxBinary(get_file_path('firefox/firefox'))
+    browser = webdriver.Firefox(firefox_binary=binary)
     # Some of sites elements are loaded via ajax - wait for them.
     browser.implicitly_wait(2)
     return browser
@@ -64,7 +67,7 @@ def wait_is_visible(browser, locator, timeout=5):
             )
         )
         return True
-    except TimeoutException:
+    except (TimeoutException, NoSuchElementException):
         return False
 
 def wait_is_not_visible(browser, locator, timeout=5):
