@@ -4,12 +4,13 @@
 # Import {{{
 import os
 import sys
-import json
+import simplejson as json
 import cookielib
 import httplib
 import urllib2
 import codecs
 from BeautifulSoup import BeautifulSoup
+from multiprocessing.dummy import Lock
 # }}}
 
 def get_file_path(file_name):
@@ -18,6 +19,16 @@ def get_file_path(file_name):
         '..',
         file_name
     )
+
+def make_dir_if_not_exists(dir_path):
+    if not os.path.exists(dir_path):
+        try:
+            os.makedirs(dir_path)
+        except:
+            if not os.path.isdir(dir_path):
+                raise
+        else:
+            print(u'Creating path %s' % dir_path.decode('utf-8'))
 
 def get_json_file(file_name):
 
@@ -114,11 +125,13 @@ def get_parsed_url_response(url, data=None, opener=None, verbose=True):
     )
 
 
-def print_progress():
-    sys.stdout.write(".")
-    sys.stdout.flush()
+def print_progress(lock=Lock()):
+    with lock:
+        sys.stdout.write(".")
+        sys.stdout.flush()
 
-def print_progress_end():
-    sys.stdout.write("\n")
-    sys.stdout.flush()
+def print_progress_end(lock=Lock()):
+    with lock:
+        sys.stdout.write("\n")
+        sys.stdout.flush()
 
