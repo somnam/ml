@@ -3,6 +3,8 @@
 
 # Import {{{
 import re
+import urllib
+import simplejson as json
 # import time
 from operator import itemgetter
 from multiprocessing.dummy import Pool, cpu_count
@@ -12,22 +14,24 @@ from optparse import OptionParser
 # from datetime import datetime
 from lib.common import (
     get_file_path,
+    get_json_file,
     dump_json_file,
     prepare_opener,
     open_url,
+    get_url_response,
     get_parsed_url_response,
     print_progress,
     print_progress_end
 )
 # }}}
 
-LC_URL = u'http://lubimyczytac.pl'
+config = get_json_file('imogeen.json')
 
 def prepare_lc_opener():
-    opener = prepare_opener(LC_URL)
+    opener = prepare_opener(config['lc_url'])
 
     # Request used to initialize cookie.
-    open_url(LC_URL, opener)
+    open_url(config['lc_url'], opener)
 
     return opener
 
@@ -36,7 +40,9 @@ def get_parsed_lc_url_response(url, opener = prepare_lc_opener()):
     return get_parsed_url_response(url, opener = opener)
 
 def get_site_url(suffix):
-    return suffix if re.match(LC_URL, suffix) else '%s/%s' % (LC_URL, suffix)
+    return (suffix 
+            if re.match(config['lc_url'], suffix) 
+            else '%s/%s' % (config['lc_url'], suffix))
 
 def get_profile_url(profile_id):
     return get_site_url('profil/%d' % profile_id)
@@ -124,6 +130,14 @@ def get_pager_info(shelf_page, shelf_page_url):
 
     return pager_info
 
+def progress_books_on_page(pager_url):
+    books = get_books_on_page(pager_url)
+    print_progress()
+    return books
+
+
+# Invalidate values after 6 hours.
+@filecache(6 * 60 * 60)
 def get_books_on_page(pager_url):
     """Get list of books on current page."""
     
@@ -136,9 +150,13 @@ def get_books_on_page(pager_url):
         )
         books = [ book['href'] for book in book_tags ]
         pager_page.decompose()
-        print_progress()
 
     return books
+
+def progress_book_info(book_url):
+    book_info = get_book_info(book_url)
+    print_progress()
+    return book_info
 
 # Invalidate values after 30 days.
 @filecache(30 * 24 * 60 * 60)
@@ -151,10 +169,7 @@ def get_book_info(book_url):
     if book_page:
 
         # Get book title and author from breadcrumbs.
-        breadcrumbs = book_page.find(
-            'ul',
-            { 'class': 'breadcrumb' }
-        ).findAll('li')
+        breadcrumbs = book_page.find('ul', { 'class': 'breadcrumb' }).findAll('li')
         book_title  = breadcrumbs.pop()
         book_author = breadcrumbs.pop().find('a')
 
@@ -189,11 +204,46 @@ def get_book_info(book_url):
         }
 
         book_page.decompose()
-        print_progress()
 
     return book_info
 
-def collect_shelf_books(pager_count, pager_url_base):
+def progress_book_price(book_info):
+    url = '{0}?{1}'.format(config['bb_url'], urllib.urlencode({
+        'name':        book_info['title'],
+        'info':        book_info['author'],
+        'number':      book_info['isbn'],
+        'skip_jQuery': '1',
+    }))
+    book_info['price'] = get_book_price(url)
+    print_progress()
+    return
+
+# Invalidate values after 30 days.
+@filecache(30 * 24 * 60 * 60)
+def get_book_price(url):
+    """Get book price."""
+
+    response      = get_url_response(url)
+    response_json = json.load(response) if response else None
+
+    book_price    = None
+    if response_json and 'status' in response_json and response_json['status']:
+        entries = (response_json['data'].values()
+                   if type(response_json['data']) is dict
+                   else response_json['data'])
+        for entry in entries:
+            if not('type' in entry and
+                   'name' in entry and
+                   entry['type'] == 'book' and
+                   entry['name'] in config['retailers']):
+                continue
+            book_price = (entry['price']
+                          if 'price' in entry and entry['price']
+                          else None)
+            break
+    return book_price
+
+def collect_shelf_books(pager_count, pager_url_base, include_price):
     shelf_books = []
     if pager_count and pager_url_base:
         # Create workers pool.
@@ -207,7 +257,7 @@ def collect_shelf_books(pager_count, pager_url_base):
         ]
 
         books_per_page = pool.map(
-            get_books_on_page,
+            progress_books_on_page,
             pager_urls
         )
         print_progress_end()
@@ -220,14 +270,17 @@ def collect_shelf_books(pager_count, pager_url_base):
 
         if book_urls:
             print("Fetching %d books info." % len(book_urls))
-            shelf_books = pool.map(
-                get_book_info,
-                book_urls
-            )
+            shelf_books = pool.map(progress_book_info, book_urls)
             print_progress_end()
             print("Fetched %d books." % len(shelf_books))
         else:
             print('No books fetched.')
+
+        if book_urls and include_price:
+            print("Fetching %d book prices." % len(shelf_books))
+            pool.map(progress_book_price, shelf_books)
+            print_progress_end()
+            print("Fetched %d book prices." % len(shelf_books))
 
         # No new jobs can be added to pool.
         pool.close()
@@ -245,7 +298,7 @@ def dump_books_list(shelf_books, file_name):
 
     return
 
-def fetch_shelf_list(profile_id, shelf_name=None, shelf_url=None, file_name=None):
+def fetch_shelf_list(profile_id, shelf_name=None, shelf_url=None, include_price=False, file_name=None):
     # Fetch shelf url if required.
     if not shelf_url:
         # Get profile url
@@ -272,14 +325,18 @@ def fetch_shelf_list(profile_id, shelf_name=None, shelf_url=None, file_name=None
         print("Fetching '%s' books list." % shelf_name)
 
         # Get pages url and count
-        pager_info = get_pager_info(shelf_page, shelf_url)
+        pager_count, pager_url_base = get_pager_info(shelf_page, shelf_url)
 
         # Fetch info of all books on list
-        shelf_books = collect_shelf_books(*pager_info)
+        shelf_books = collect_shelf_books(
+            pager_count, pager_url_base, include_price
+        )
 
     if shelf_books:
-        # Sort books by release.
-        shelf_books.sort(key=itemgetter('release'), reverse=True)
+        # Sort books by release or price.
+        sort_key     = 'price' if include_price else 'release'
+        reverse_sort = False if sort_key == 'price' else True
+        shelf_books.sort(key=itemgetter(sort_key), reverse=reverse_sort)
 
         # Dump list of books to file
         if not file_name:
@@ -326,7 +383,7 @@ def fetch_shelves_info(profile_id, skip_library_shelf=True):
 
     return shelves_info
 
-def fetch_all_shelves(profile_id):
+def fetch_all_shelves(profile_id, include_price):
     shelves = fetch_shelves_info(profile_id)
 
     for shelf in shelves:
@@ -334,6 +391,7 @@ def fetch_all_shelves(profile_id):
             profile_id, 
             shelf_name=shelf['name'],
             shelf_url=shelf['url'],
+            include_price=include_price,
             file_name=shelf['filename'],
         )
 
@@ -347,6 +405,7 @@ def main():
     option_parser.add_option("-t", "--to-read", action="store_true")
     option_parser.add_option("-o", "--owned", action="store_true")
     option_parser.add_option("-r", "--read", action="store_true")
+    option_parser.add_option("-p", "--price", action="store_true")
     option_parser.add_option("-s", "--shelf")
     option_parser.add_option("-i", "--profile-id", type="int")
 
@@ -362,7 +421,9 @@ def main():
         option_parser.print_help()
     elif options.to_read:
         # Scan to read list
-        fetch_shelf_list(options.profile_id, 'chce-przeczytac')
+        fetch_shelf_list(
+            options.profile_id, 'chce-przeczytac', include_price=options.price
+        )
     elif options.read:
         fetch_shelf_list(options.profile_id, 'przeczytane')
     elif options.owned:
@@ -371,9 +432,11 @@ def main():
     elif options.shelf:
         # Fetch books from all shelves.
         if options.shelf == 'all':
-            fetch_all_shelves(options.profile_id)
+            fetch_all_shelves(options.profile_id, options.price)
         else:
-            fetch_shelf_list(options.profile_id, options.shelf)
+            fetch_shelf_list(
+                options.profile_id, options.shelf, include_price=options.price
+            )
 
 if __name__ == "__main__":
     # start_time = datetime.now()
