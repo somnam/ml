@@ -4,10 +4,14 @@
 # Import {{{
 import re
 import time
-import urllib2
-from BeautifulSoup import BeautifulSoup
-from lib.common import prepare_opener, open_url, get_json_file
+import socket
+import cookielib
+from fuzzywuzzy import fuzz
+from lib.common import prepare_opener, open_url, get_json_file, get_parsed_url_response
 from lib.automata import (
+    browser_start,
+    browser_stop,
+    browser_timeout,
     browser_select_by_id_and_value,
     wait_is_visible,
     wait_is_not_visible,
@@ -18,23 +22,126 @@ from selenium.webdriver.common.keys import Keys
 
 LIBRARIES_DATA = get_json_file('opac.json')
 
-class n4949(object):
-    url   = LIBRARIES_DATA['4949']['url']
-    title = LIBRARIES_DATA['4949']['title']
+class LibraryBase(object):
+    socket_timeout = 10.0
 
-    def __init__(self):
-        self.opener = prepare_opener(n4949.url)
+    def __init__(self, books=None):
+        self.opener  = None
+        self.browser = None
+        self.books   = [] if books is None else books
+
+    def init_browser(self):
         # Request used to initialize cookie.
-        open_url(n4949.url, self.opener)
+        self.cookie_jar = cookielib.CookieJar()
+        self.opener     = prepare_opener(self.data['url'], cookie_jar=self.cookie_jar)
+        open_url(self.data['url'], self.opener)
 
-    def pre_process(self, browser):
+        # Set timeout for request.
+        socket.setdefaulttimeout(self.socket_timeout)
+
+        # Try to load browser.
+        self.retry_load_browser()
+
+    def retry_load_browser(self):
+        retry_start = 2
+        while not self.browser and retry_start:
+            try:
+                self.browser = browser_start()
+                print(u'Loading search form.')
+                self.browser.get(self.data['url'])
+                if 'title' in self.data and self.data['title']:
+                    assert self.data['title'] in self.browser.title
+            except socket.timeout:
+                print(u'Browser start timed out.')
+                retry_start -= 1
+                if retry_start:
+                    print(u'Retry starting browser')
+                else:
+                    print(u"Browser start failed.")
+                    raise
+
+    def stop_browser(self):
+        # Quit browser.
+        if self.browser: browser_stop(self.browser)
+        # Restore default timeout value.
+        socket.setdefaulttimeout(None)
+
+    def get_books_status(self):
+        self.init_browser()
+
+        # Will contain books info.
+        books_status = []
+        for book in self.books:
+            book_info = self.get_book_info(book)
+            books_status.append(book_info)
+
+        self.stop_browser()
+
+        return books_status
+
+    def get_book_info(self, book):
+        book_info = None
+        # Retry fetching book info (title vs isbn).
+        retry_fetch = 2
+        while not book_info and retry_fetch:
+            # Start browser if required.
+            self.retry_load_browser()
+            # Check if browser actually started - can't continue without it.
+            if not self.browser: break
+
+            # Search first by isbn, then by title.
+            search_field = 'title' if retry_fetch % 2 else 'isbn'
+
+            # Try fetching book info.
+            try:
+                # Fetch book info.
+                self.pre_process()
+                book_info = self.query_book_info(book, search_field)
+                self.post_process()
+            except socket.timeout:
+                print(u'Querying book info timed out.')
+                browser_timeout(self.browser)
+                # Retry fetching book with same params and a new browser.
+                if not book_info: continue
+            finally:
+                # Is called when except does 'continue'
+                retry_fetch -= 1
+
+            if book_info:
+                print(u'Successfully queried book info.')
+                break
+            elif retry_fetch:
+                print(u'Retry book fetching.')
+            else:
+                print(u'Book fetching failed.')
+
+        return {
+            'author': book['author'],
+            'title' : '"%s"' % book['title'],
+            'info'  : book_info if book_info else "Brak",
+        }
+
+    def query_book_info(self, book, search_field):
+        if not(book.has_key(search_field) and book[search_field]):
+            return
+
+        # Query book and fetch results.
+        results = self.query_book(book, search_field)
+        match   = self.get_matching_result(book, search_field, results)
+        info    = self.extract_book_info(book, match)
+
+        return info
+
+class n4949(LibraryBase):
+    data = LIBRARIES_DATA['4949']
+
+    def pre_process(self):
         # Clear opac site.
-        print(u'Clearing search form.')
-        browser.find_element_by_id('form1:textField1').clear()
-        return
+        self.browser.find_element_by_id('form1:textField1').clear()
 
-    def post_process(self, browser):
-        pass
+    def post_process(self):
+        # Sleep for short time to avoid frequent requests.
+        time.sleep(0.2)
 
     # Search type:
     # 1 - Author
@@ -46,216 +153,211 @@ class n4949(object):
     # 2  - Book
     # 9  - Magazine
     # 15 - Audiobook
-    def query_book(self, browser, search_value, search_field):
+    def query_book(self, book, search_field):
+        search_value = book[search_field]
         search_type, resource_type = None, None
         if search_field == 'isbn':
-            print(u'Querying book by isbn "%s" .' % search_value)
             search_type, resource_type = '3', '2'
         elif search_field == 'title':
-            print(u'Querying book by title.')
             search_type, resource_type = '2', '2'
 
         # Input search value.
-        text_field = browser.find_element_by_id('form1:textField1')
+        text_field = self.browser.find_element_by_id('form1:textField1')
         text_field.send_keys(search_value)
 
         # Hide autocomplete popup.
         autocomplete_popup = 'autoc1'
-        wait_is_visible(browser, autocomplete_popup)
+        wait_is_visible(self.browser, autocomplete_popup)
         text_field.send_keys(Keys.ESCAPE)
-        wait_is_not_visible(browser, autocomplete_popup)
+        wait_is_not_visible(self.browser, autocomplete_popup)
 
         # Set search type.
-        browser_select_by_id_and_value(browser, 'form1:dropdown1', search_type)
+        browser_select_by_id_and_value(self.browser, 'form1:dropdown1', search_type)
 
         # Set resource_type.
-        browser_select_by_id_and_value(browser, 'form1:dropdown4', resource_type)
+        browser_select_by_id_and_value(self.browser, 'form1:dropdown4', resource_type)
 
         # Submit form.
-        print(u'Submitting form.')
-        submit = browser.find_element_by_id('form1:btnSzukajIndeks')
+        submit = self.browser.find_element_by_id('form1:btnSzukajIndeks')
         submit.click()
 
         # Wait for results to appear.
         results         = None
-        results_wrapper = browser.find_element_by_class_name(
-            'hasla'
-        )
+        results_wrapper = self.browser.find_element_by_xpath('//ul[@class="kl"]')
         if (results_wrapper):
-            results = results_wrapper.find_elements_by_tag_name(
-                'a'
-            )
+            results = results_wrapper.find_elements_by_xpath('//li/a')
 
         # Return search results.
-        print(u'Returning search results.')
         return results
 
-    def get_matching_result(self, browser, search_value, search_field, results):
+    def get_matching_result(self, book, search_field, results):
         if not results:
             print(u'No match found.')
             return
 
-        replace_from = '-' if search_field == 'isbn' else ' '
-        match_value  = search_value.replace(replace_from, '')
-        print(u'Matching for value by field "%s".' % search_field)
+        return (self.get_matching_result_isbn(book, results) 
+                if search_field == 'isbn'
+                else self.get_matching_result_name(book, results))
 
-        match = None
+    def get_matching_result_isbn(self, book, results):
+        match_value = book['isbn'].replace('-', '')
+
+        print(u'Matching for value by field "isbn".')
+        matching = []
         for elem in results:
-            if elem.text.lstrip().replace(replace_from, '') == match_value:
-                elem.click()
-                content = elem.find_element_by_xpath('..') \
-                              .find_element_by_class_name('zawartosc')
+            elem_value = elem.text.lstrip().replace('-', '')
+            if elem_value != match_value: continue
 
-                try:
-                    match = content.find_element_by_tag_name('a')
-                    print(u'Found match.')
-                except NoSuchElementException:
-                    pass
+            matching = self.extract_matching_results(elem)
+            break
 
-                break
+        return matching
 
-        if not match:
-            print(u'No match found.')
+    def get_matching_result_name(self, book, results):
+        match_value = book['title']
 
-        return match
+        print(u'Matching for value by field "title".')
+        matching = []
+        for elem in results:
+            elem_value  = elem.text.lstrip()
+            match_ratio = fuzz.partial_ratio(match_value, elem_value)
 
-    def get_url_response(self, url):
-        response = None
-        if url:
-            response = self.opener.open(urllib2.Request(url)).read()
-        return response
+            if match_ratio < 95: continue
+            matching = self.extract_matching_results(elem)
+            break
 
-    def extract_book_info(self, browser, book, match):
-        if not (book and match):
+        return matching
+
+    def extract_matching_results(self, elem):
+        elem.click()
+        content = elem.find_element_by_xpath('..') \
+                      .find_element_by_class_name('zawartosc')
+        results = []
+        try:
+            results = content.find_elements_by_xpath('//img[@title="Książka"]/..')
+        except NoSuchElementException:
+            print(u'Empty results list.')
+
+        return results
+
+    def extract_book_info(self, book, results):
+        if not (book and results):
             return
 
-        print(u'Redirecting to book info.')
-        book_url = match.get_attribute('href')
-        response = self.get_url_response(book_url)
+        re_department = re.compile('\([^\)]+\)')
+        re_address    = re.compile('\,[^\,]+\,')
 
-        print(u'Fetching book infos.')
-        div = BeautifulSoup(
-            response,
-            convertEntities=BeautifulSoup.HTML_ENTITIES
-        ).find('div', { 'id': 'zasob' })
-        warnings = div.findAll('div', { 'class': 'opis_uwaga' })
-        infos    = [ div.parent for div in warnings ]
-
-        re_department   = re.compile('\([^\)]+\)')
-        re_address      = re.compile('\,[^\,]+\,')
-
-        # Fetch department, address and availability info.
         info_by_library = []
-        for i in range(len(infos)):
-            print(u'Fetching department, address and availability info %d.' % i)
-            info, warning = infos[i].text, warnings[i].text
+        print(u'Fetching %d editions info.' % len(results))
+        for match in results:
+            book_url = match.get_attribute('href')
+            response = get_parsed_url_response(book_url, opener=self.opener)
 
-            # Get department string.
-            department = re_department.search(info)
-            if department:
-                department = department.group()
+            div      = response.find('div', { 'id': 'zasob' })
+            warnings = div.findAll('div', { 'class': 'opis_uwaga' })
+            infos    = [ div.parent for div in warnings ]
 
-            # Get address string.
-            address = re_address.search(info)
-            if address:
-                address = address.group().replace(',', '').lstrip()
+            # Fetch department, address and availability info.
+            for i in range(len(infos)):
+                info, warning = infos[i].text, warnings[i].text
 
-            # Get availability info.
-            availability = warning
-            if not availability:
-                availability = u'Dostępna'
+                # Get address string.
+                address = re_address.search(info)
+                if address:
+                    address = address.group().replace(',', '').lstrip()
+                # Check if address is in accepted list.
+                if not address in self.data['accepted_address']: continue
 
-            info_by_library.append(
-                '%s - %s - %s' % 
-                (department, address, availability)
-            )
+                # Get department string.
+                department = re_department.search(info)
+                if department:
+                    department = department.group()
 
-        div.decompose()
+                # Get availability info.
+                availability = warning if warning else u'Dostępna'
 
-        return "\n".join(info_by_library)
+                info_by_library.append(
+                    '%s - %s - %s' % 
+                    (department, address, availability)
+                )
 
-    def get_book_info(self, browser, book, search_field):
-        if not(book.has_key(search_field) and book[search_field]):
-            return
+            response.decompose()
 
-        # Query book and fetch results.
-        results = self.query_book(
-            browser, book[search_field], search_field
-        )
-        match   = self.get_matching_result(
-            browser, book[search_field], search_field, results
-        )
-        info    = self.extract_book_info(browser, book, match)
+            # Sleep for short time to avoid frequent requests.
+            time.sleep(0.1)
 
-        if info:
-            print(u'Book info found.')
-        else:
-            print(u'Failed fetching book info.')
+        if info_by_library:
+            print(u'Found match.')
 
-        return info
+        return "\n".join(info_by_library) if info_by_library else None
 
-class n5004(object):
-    url   = LIBRARIES_DATA['5004']['url']
-    title = LIBRARIES_DATA['5004']['title']
+class n5004(LibraryBase):
+    data = LIBRARIES_DATA['5004']
 
-    def pre_process(self, browser):
-        pass
+    def pre_process(self):
+        # Close alert box if present.
+        try:
+            alert_box = self.browser.find_element_by_id('alertboxsec')
+            button    = alert_box.find_element_by_tag_name('button')
+            button.click()
+        except NoSuchElementException:
+            pass
 
-    def post_process(self, browser):
-        button = browser.find_element_by_id('logo_content')
+    def post_process(self):
+        button = self.browser.find_element_by_id('logo_content')
         link   = button.find_element_by_tag_name('a')
         link.click()
 
-    def set_search_type_and_value(self, browser, type_id, type_value, search_id, search_value):
+    def set_search_type_and_value(self, type_id, type_value, search_id, search_value):
         can_search = (
-            wait_is_visible(browser, type_id) and
-            wait_is_visible(browser, search_id)
+            wait_is_visible(self.browser, type_id) and
+            wait_is_visible(self.browser, search_id)
         )
 
         if can_search:
             # Set search type.
-            browser_select_by_id_and_value(browser, type_id, type_value)
+            browser_select_by_id_and_value(self.browser, type_id, type_value)
             # Input search value.
-            browser.find_element_by_id(search_id).send_keys(search_value)
+            self.browser.find_element_by_id(search_id).send_keys(search_value)
 
         return can_search
 
-    def query_book(self, browser, book, search_field):
+    def query_book(self, book, search_field):
         search_value = book[search_field]
-        type_value   = 'm21isn' if search_field == 'isbn' else 'nowy'
+        type_value   = 'm21isn' if search_field == 'isbn' else 'm21tytuł'
         can_search   = self.set_search_type_and_value(
-            browser, 'IdSzIdx1', type_value, 'IdTxtSz1', search_value
+            'IdSzIdx1', type_value, 'IdTxtSz1', search_value
         )
         if search_field != 'isbn':
             can_search = self.set_search_type_and_value(
-                browser, 'IdSzIdx2', 'if100a', 'IdTxtSz2', book['author']
+                'IdSzIdx2', 'if100a', 'IdTxtSz2', book['author']
             )
 
         # Search fields didn't load properly - can't run query.
         if not can_search: return None
 
         # Submit form.
-        submit = browser.find_element_by_id('search')
+        submit = self.browser.find_element_by_id('search')
         submit.click()
 
         # Search for results in table.
         results = None
         try:
-            browser.find_element_by_class_name('emptyRecord')
+           self.browser.find_element_by_class_name('emptyRecord')
         except NoSuchElementException:
-            results = browser.find_elements_by_class_name('opisokladka');
+            results = self.browser.find_elements_by_class_name('opisokladka');
 
         return results
 
-    def get_matching_result(self, browser, book, search_field, results):
+    def get_matching_result(self, book, search_field, results):
         if not results: return
 
-        match = None
+        matching = []
         # Only one result should be returned when searching by ISBN.
         if search_field == 'isbn' and len(results) == 1:
-            match = results[0].find_element_by_tag_name('a')
+            matching.append(results[0].find_element_by_tag_name('a'))
         else:
-            info_re = re.compile(r'^(.+)\.\s-.*$')
+            info_re = re.compile(r'^(.+)\s;\s.*$')
             for result in results:
                 # Extract title and author form entry.
                 info = info_re.search(result.text)
@@ -266,52 +368,50 @@ class n5004(object):
                 if not info_match: continue
 
                 title, author = info_match.split('/')
-                if re.search(book['author'], author) and \
-                   re.search(book['title'], title):
-                    match = result.find_element_by_tag_name('a')
-                    break
-        return match
+                title_ratio   = fuzz.partial_ratio(book['title'], title)
+                author_ratio  = fuzz.partial_ratio(book['author'], author)
+                if title_ratio < 95 and author_ratio < 95: continue
 
-    def extract_book_info(self, browser, book, match):
-        if not match: return
+                matching.append(result.find_element_by_tag_name('a'))
 
-        # Click book link
-        match.click()
+        return matching
 
-        # Search for book info.
-        info_table = None
-        try:
-            info_table = browser.find_element_by_xpath(
-                '//table[@class="tabOutWyniki_w"]'
-            )
-        except NoSuchElementException:
-            return
+    def extract_book_info(self, book, results):
+        if not (book and results): return
 
-        # Extract book info from rows.
-        info_rows = info_table.find_elements_by_class_name('tdOutWyniki_w')
+        onclick_re = re.compile(r"^javascript:LoadWebPg\('([^']+)',\s'([^']+)'\);.*$")
 
-        # Pack results.
-        headers_len, book_info = 5, []
-        found_rows_num = len(info_rows) / headers_len
-        for row_num in range(found_rows_num):
-            range_start = row_num * headers_len
-            range_end   = range_start + headers_len
-            book_info.append('-'.join(map(
-                lambda r: r.text,
-                info_rows[range_start:range_end]
-            )))
-
-        return "\n".join(book_info)
-
-    def get_book_info(self, browser, book, search_field):
-        if not(book.has_key(search_field) and book[search_field]):
-            return
-
-        # Query book and fetch results.
-        results = self.query_book(browser, book, search_field)
-        match   = self.get_matching_result(
-            browser, book, search_field, results
+        # Get session cookie.
+        session_cookie = next(
+            (cookie for cookie in self.cookie_jar if cookie.name == 'idses'), None
         )
-        info    = self.extract_book_info(browser, book, match)
+        session_id     = session_cookie.value if session_cookie else None
 
-        return info
+        headers_len, book_info = 5, []
+        for match in results:
+            onclick_match = onclick_re.search(match.get_attribute('onclick'))
+            if not onclick_match: continue
+
+            url_suffix, url_params = onclick_match.groups()
+
+            book_url = '{0}{1}?ID1={2}&ln=pl{3}'.format(
+                self.data['base_url'], url_suffix, session_id, url_params
+            )
+
+            response = get_parsed_url_response(book_url, opener=self.opener)
+            if not response: continue
+
+            # Extract book info from rows.
+            info_table = response.find('table', {'class': 'tabOutWyniki_w'})
+            info_rows  = info_table.findAll('td', {'class': 'tdOutWyniki_w'})
+
+            # Pack results.
+            found_rows_num = len(info_rows) / headers_len
+            for row_num in range(found_rows_num):
+                range_start = row_num * headers_len
+                range_end   = range_start + headers_len
+                book_info.append(' '.join(
+                    row.text for row in info_rows[range_start:range_end]
+                ))
+
+        return "\n".join(book_info) if book_info else None

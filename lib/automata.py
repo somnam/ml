@@ -32,26 +32,31 @@ def browser_stop(browser):
     return
 
 def browser_timeout(browser):
-    print('Restarting browser.')
+    print('Stopping browser.')
+
+    tempfolder = None
+    if browser.profile and browser.profile.tempfolder:
+        tempfolder = browser.profile.tempfolder
 
     # Kill current browser instance.
-    taskkill = None
+    taskill = None
     if browser.binary and browser.binary.process:
         print(u'Killing firefox process "%s".' % browser.binary.process.pid)
-        taskkill = 'kill -9 %s' % browser.binary.process.pid
+        taskill = 'kill -9 %s' % browser.binary.process.pid
     else:
         print(u'Killing firefox process.')
-        taskkill = 'pkill -9 firefox'
-    os.system(taskkill)
+        taskill = 'pkill -9 firefox'
+    os.system(taskill)
 
     # Remove temp folder.
-    if browser.profile and browser.profile.tempfolder:
+    if tempfolder:
         print(u'Removing temporary profile.')
         time.sleep(0.1)
-        shutil.rmtree(browser.profile.tempfolder)
+        shutil.rmtree(tempfolder)
 
     # Remove object.
     browser = None
+
     return
 
 def browser_select_by_id_and_value(browser, select_id, select_value):
@@ -62,9 +67,7 @@ def browser_select_by_id_and_value(browser, select_id, select_value):
 def wait_is_visible(browser, locator, timeout=5):
     try:
         WebDriverWait(browser, timeout).until(
-            expected_conditions.visibility_of_element_located(
-                (By.ID, locator)
-            )
+            expected_conditions.visibility_of_element_located((By.ID, locator))
         )
         return True
     except (TimeoutException, NoSuchElementException):
@@ -73,9 +76,7 @@ def wait_is_visible(browser, locator, timeout=5):
 def wait_is_not_visible(browser, locator, timeout=5):
     try:
         WebDriverWait(browser, timeout).until_not(
-            expected_conditions.visibility_of_element_located(
-                (By.ID, locator)
-            )
+            expected_conditions.visibility_of_element_located((By.ID, locator))
         )
         return True
     except TimeoutException:

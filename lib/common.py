@@ -53,9 +53,11 @@ def dump_json_file(struct, file_path):
     return
 
 
-def prepare_opener(url, headers=None, data=None):
+def prepare_opener(url, headers=None, data=None, cookie_jar=None):
+    # Prepare jar for cookies.
+    if cookie_jar is None: cookie_jar = cookielib.CookieJar()
+
     # Prepare request handler.
-    cookie_jar = cookielib.CookieJar()
     opener     = urllib2.build_opener(
         urllib2.HTTPCookieProcessor(cookie_jar),
         # urllib2.HTTPHandler(debuglevel=1),
@@ -63,11 +65,12 @@ def prepare_opener(url, headers=None, data=None):
 
     # Prepare request headers.
     headers = headers if headers else {}
+
     # Append user agent to headers.
-    headers['User-Agent'] = headers['User-Agent'] if headers.has_key('User-Agent') \
-                                                  else 'Mozilla/5.0 Gecko Firefox'
+    if not 'User-Agent' in headers: headers['User-Agent'] = 'Mozilla/5.0 Gecko Firefox'
+
     # Append referer to headers.
-    headers['Referer'] = headers['Referer'] if headers.has_key('Referer') else url
+    if not 'Referer' in headers: headers['Referer'] = url
 
     # Update opener with headers
     opener.addheaders = [(key, headers[key]) for key in headers.keys()]
@@ -96,7 +99,7 @@ def open_url(url, opener, data=None, verbose=True):
 def get_url_response(url, headers=None, data=None, opener=None, verbose=True):
     """Send request to given url and ask for response."""
 
-    opener = (opener or prepare_opener(url, headers=headers))
+    if opener is None: opener = prepare_opener(url, headers=headers)
 
     return open_url(url, opener, data, verbose=verbose)
 
@@ -111,7 +114,7 @@ def parse_url_response(response, verbose=True):
             )
         except TypeError:
             if verbose:
-                print(u'Error fetching response for url "%s".' % url)
+                print(u'Error parsing response.')
 
     return parser
 
