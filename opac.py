@@ -22,7 +22,7 @@ from lib.xls import make_xls
 # }}}
 
 # Lovely constants.
-WORKSHEET_HEADERS = (u'author', u'title', u'info')
+WORKSHEET_HEADERS = (u'author', u'title', u'info', u'pages', u'link')
 
 def get_books_status(books_list, library):
     if not books_list: return

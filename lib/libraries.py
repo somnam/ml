@@ -119,6 +119,8 @@ class LibraryBase(object):
             'author': book['author'],
             'title' : '"%s"' % book['title'],
             'info'  : book_info if book_info else "Brak",
+            'pages' : book['pages'],
+            'link'  : book['url'],
         }
 
     def query_book_info(self, book, search_field):
@@ -134,6 +136,9 @@ class LibraryBase(object):
 
 class n4949(LibraryBase):
     data = LIBRARIES_DATA['4949']
+
+    isbn_re  = re.compile('\D+')
+    title_re = re.compile('^([^\.]+)')
 
     def pre_process(self):
         # Clear opac site.
@@ -185,7 +190,7 @@ class n4949(LibraryBase):
         results         = None
         results_wrapper = self.browser.find_element_by_xpath('//ul[@class="kl"]')
         if (results_wrapper):
-            results = results_wrapper.find_elements_by_xpath('//li/a')
+            results = results_wrapper.find_elements_by_xpath('li/a')
 
         # Return search results.
         return results
@@ -197,7 +202,7 @@ class n4949(LibraryBase):
 
         return (self.get_matching_result_isbn(book, results) 
                 if search_field == 'isbn'
-                else self.get_matching_result_name(book, results))
+                else self.get_matching_result_title(book, results))
 
     def get_matching_result_isbn(self, book, results):
         match_value = book['isbn'].replace('-', '')
@@ -205,7 +210,8 @@ class n4949(LibraryBase):
         print(u'Matching for value by field "isbn".')
         matching = []
         for elem in results:
-            elem_value = elem.text.lstrip().replace('-', '')
+            # Replace all non-numeric characters in isbn.
+            elem_value = self.isbn_re.sub('', elem.text)
             if elem_value != match_value: continue
 
             matching = self.extract_matching_results(elem)
@@ -213,13 +219,13 @@ class n4949(LibraryBase):
 
         return matching
 
-    def get_matching_result_name(self, book, results):
+    def get_matching_result_title(self, book, results):
         match_value = book['title']
 
         print(u'Matching for value by field "title".')
         matching = []
         for elem in results:
-            elem_value  = elem.text.lstrip()
+            elem_value  = elem.text.strip()
             match_ratio = fuzz.partial_ratio(match_value, elem_value)
 
             if match_ratio < 95: continue
@@ -234,7 +240,7 @@ class n4949(LibraryBase):
                       .find_element_by_class_name('zawartosc')
         results = []
         try:
-            results = content.find_elements_by_xpath('//img[@title="Książka"]/..')
+            results = content.find_elements_by_tag_name('a')
         except NoSuchElementException:
             print(u'Empty results list.')
 
@@ -264,7 +270,7 @@ class n4949(LibraryBase):
                 # Get address string.
                 address = re_address.search(info)
                 if address:
-                    address = address.group().replace(',', '').lstrip()
+                    address = address.group().replace(',', '').strip()
                 # Check if address is in accepted list.
                 if not address in self.data['accepted_address']: continue
 
@@ -293,6 +299,10 @@ class n4949(LibraryBase):
 
 class n5004(LibraryBase):
     data = LIBRARIES_DATA['5004']
+
+    info_re    = re.compile(u'^(.+)\.\s-\s.*$')
+    tr_re      = re.compile(u'^(.+)\s;\sprzeł.*$')
+    onclick_re = re.compile(u"^javascript:LoadWebPg\('([^']+)',\s'([^']+)'\);.*$")
 
     def pre_process(self):
         # Close alert box if present.
@@ -357,19 +367,25 @@ class n5004(LibraryBase):
         if search_field == 'isbn' and len(results) == 1:
             matching.append(results[0].find_element_by_tag_name('a'))
         else:
-            info_re = re.compile(r'^(.+)\s;\s.*$')
             for result in results:
-                # Extract title and author form entry.
-                info = info_re.search(result.text)
+                info = self.info_re.search(result.text)
                 if not info: continue
 
-                # Check if author and title match.
                 info_match = info.group(1)
-                if not info_match: continue
 
+                # Check if entry contains translation info.
+                tr_match = self.tr_re.search(info_match)
+                # Remove translation info.
+                if tr_match: info_match = tr_match.group(1)
+
+                if not info_match: return
+
+                # Extract title and author form entry.
                 title, author = info_match.split('/')
+                # Check if author and title match.
                 title_ratio   = fuzz.partial_ratio(book['title'], title)
                 author_ratio  = fuzz.partial_ratio(book['author'], author)
+                # If title or author matches > 95% then collect results.
                 if title_ratio < 95 and author_ratio < 95: continue
 
                 matching.append(result.find_element_by_tag_name('a'))
@@ -379,8 +395,6 @@ class n5004(LibraryBase):
     def extract_book_info(self, book, results):
         if not (book and results): return
 
-        onclick_re = re.compile(r"^javascript:LoadWebPg\('([^']+)',\s'([^']+)'\);.*$")
-
         # Get session cookie.
         session_cookie = next(
             (cookie for cookie in self.cookie_jar if cookie.name == 'idses'), None
@@ -389,7 +403,7 @@ class n5004(LibraryBase):
 
         headers_len, book_info = 5, []
         for match in results:
-            onclick_match = onclick_re.search(match.get_attribute('onclick'))
+            onclick_match = self.onclick_re.search(match.get_attribute('onclick'))
             if not onclick_match: continue
 
             url_suffix, url_params = onclick_match.groups()

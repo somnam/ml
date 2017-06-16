@@ -27,6 +27,11 @@ from lib.common import (
 
 config = get_json_file('imogeen.json')
 
+to_read_class_re       = re.compile('shelf-name')
+book_original_title_re = re.compile('tytu?')
+book_pages_no_re       = re.compile('liczba stron')
+book_subtitle_re       = re.compile('^([^\.]+)(?:\.\s(.*))?$')
+
 def prepare_lc_opener():
     opener = prepare_opener(config['lc_url'])
 
@@ -84,7 +89,6 @@ def get_shelf_url(library_page, shelf):
     shelf_url = None
     if library_page:
         to_read_re       = re.compile('\/%s\/miniatury' % shelf)
-        to_read_class_re = re.compile('shelf-name')
         shelf_url_base   = library_page.find(
             'a',
             { 'href': to_read_re, 'class': to_read_class_re }
@@ -181,18 +185,19 @@ def get_book_info(book_url):
 
         # Get original title if present.
         book_original_title     = None
-        book_original_title_re  = re.compile('tytu?')
         # Get pages number.
         book_pages_no    = None
-        book_pages_no_re = re.compile('liczba stron')
         for div in book_details.findAll('div', { 'class': 'profil-desc-inline' }):
             if div.find(text=book_original_title_re):
                 book_original_title = div.find('dd').string
             elif div.find(text=book_pages_no_re):
                 book_pages_no = div.find('dd').string
 
+        title, subtitle = book_subtitle_re.search(book_title.string).groups()
+
         book_info = {
-            'title'             : book_title.string,
+            'title'             : (title or book_title.string),
+            'subtitle'          : subtitle,
             'original_title'    : book_original_title,
             'author'            : book_author.string,
             'category'          : book_category.string,
