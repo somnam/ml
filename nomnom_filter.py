@@ -104,8 +104,8 @@ def filter_nomnom_page(recipe_url_value, contains_re, filter_re):
 
     return filtered_recipe
 
-# Invalidate values after 30 days.
-@filecache(30 * 24 * 60 * 60)
+# Invalidate values after a year
+@filecache(365 * 24 * 60 * 60)
 def get_nomnom_page(recipe_url):
     # Get BeautifulSoup page instance.
     parser = get_parsed_url_response(recipe_url, verbose=False)

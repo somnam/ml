@@ -39,23 +39,18 @@ def browser_timeout(browser):
         tempfolder = browser.profile.tempfolder
 
     # Kill current browser instance.
-    taskill = None
-    if browser.binary and browser.binary.process:
+    if browser.binary:
         print(u'Killing firefox process "%s".' % browser.binary.process.pid)
-        taskill = 'kill -9 %s' % browser.binary.process.pid
+        browser.binary.kill()
     else:
         print(u'Killing firefox process.')
-        taskill = 'pkill -9 firefox'
-    os.system(taskill)
+        os.system('pkill -9 firefox')
 
     # Remove temp folder.
     if tempfolder:
         print(u'Removing temporary profile.')
         time.sleep(0.1)
         shutil.rmtree(tempfolder)
-
-    # Remove object.
-    browser = None
 
     return
 

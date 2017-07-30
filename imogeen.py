@@ -193,10 +193,15 @@ def get_book_info(book_url):
             elif div.find(text=book_pages_no_re):
                 book_pages_no = div.find('dd').string
 
-        title, subtitle = book_subtitle_re.search(book_title.string).groups()
+
+        subtitle_result = book_subtitle_re.search(book_title.string)
+        if subtitle_result:
+            title, subtitle = subtitle_result.groups()
+        else:
+            title, subtitle = book_title.string, None
 
         book_info = {
-            'title'             : (title or book_title.string),
+            'title'             : title,
             'subtitle'          : subtitle,
             'original_title'    : book_original_title,
             'author'            : book_author.string,

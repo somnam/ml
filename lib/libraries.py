@@ -101,6 +101,8 @@ class LibraryBase(object):
             except socket.timeout:
                 print(u'Querying book info timed out.')
                 browser_timeout(self.browser)
+                # Remove object.
+                self.browser = None
                 # Retry fetching book with same params and a new browser.
                 if not book_info: continue
             finally:
@@ -417,7 +419,9 @@ class n5004(LibraryBase):
 
             # Extract book info from rows.
             info_table = response.find('table', {'class': 'tabOutWyniki_w'})
-            info_rows  = info_table.findAll('td', {'class': 'tdOutWyniki_w'})
+            if not info_table: continue
+            info_rows = info_table.findAll('td', {'class': 'tdOutWyniki_w'})
+            if not info_rows: continue
 
             # Pack results.
             found_rows_num = len(info_rows) / headers_len
