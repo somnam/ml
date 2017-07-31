@@ -14,11 +14,7 @@ from multiprocessing.dummy import Lock
 # }}}
 
 def get_file_path(file_name):
-    return os.path.join(
-        os.path.dirname(__file__),
-        '..',
-        file_name
-    )
+    return os.path.join(os.getcwd(), file_name)
 
 def make_dir_if_not_exists(dir_path):
     if not os.path.exists(dir_path):

@@ -1,3 +1,4 @@
+import os
 from lib.common import (
     prepare_opener,
     open_url,
@@ -73,23 +74,38 @@ def append_protein_names_to_workbook(workbook):
 
     return
 
+def get_excel_file_names(args):
+    file_names = args
+    # If file names aren't given in path, look for them inside current dir.
+    if not args:
+        file_names = filter(
+            lambda fn: fn.endswith('.xlsx'),
+            os.listdir(os.getcwd())
+        )
+    return file_names
+
+def process_workbooks(file_names):
+    for idx, file_name in enumerate(file_names, 1):
+        workbook, error = open_workbook(file_name)
+
+        if error:
+            print(error)
+            continue
+
+        append_protein_names_to_workbook(workbook)
+
+        print(u"Saving workbook {0} of {1}.".format(idx, len(file_names)))
+        save_workbook(workbook, file_name)
+
 def main():
     # cmd options parser
     option_parser = OptionParser()
 
     (options, args) = option_parser.parse_args()
 
-    file_name       = args[0] if args else None
-    workbook, error = open_workbook(file_name)
+    file_names = get_excel_file_names(args)
 
-    if error:
-        print(error)
-        return
-
-    append_protein_names_to_workbook(workbook)
-
-    print(u'Saving workbook')
-    save_workbook(workbook, file_name)
+    process_workbooks(file_names)
 
 if __name__ == "__main__":
     main()
