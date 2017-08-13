@@ -7,6 +7,7 @@ import time
 import socket
 import cookielib
 from fuzzywuzzy import fuzz
+from filecache import filecache
 from lib.common import prepare_opener, open_url, get_json_file, get_parsed_url_response
 from lib.automata import (
     browser_start,
@@ -69,15 +70,23 @@ class LibraryBase(object):
     def get_books_status(self):
         self.init_browser()
 
+        cached_book_info_wrapper = self.cached_book_info_wrapper()
+
         # Will contain books info.
         books_status = []
         for book in self.books:
-            book_info = self.get_book_info(book)
+            book_info = cached_book_info_wrapper(book)
             books_status.append(book_info)
 
         self.stop_browser()
 
         return books_status
+
+    def cached_book_info_wrapper(self):
+        @filecache(24 * 60 * 60)
+        def get_cached_book_info(book):
+            return self.get_book_info(book)
+        return get_cached_book_info
 
     def get_book_info(self, book):
         book_info = None

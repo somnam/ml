@@ -30,18 +30,23 @@ def make_xls(file_name, worksheet_name, worksheet_headers, entries):
     for entry in entries:
         row = []
         for index, header in enumerate(worksheet_headers):
+            entry_value = entry[header]
+            # Don't process empty values.
+            if entry_value is None:
+                row.append(None)
+                continue
+
             # Calculate entry length.
-            if no_newlie_re.match(entry[header]):
-                entry_length = len(entry[header])
+            if no_newlie_re.match(entry_value):
+                entry_length = len(entry_value)
             else:
-                entry_length = len(max(
-                    entry[header].split(u"\n"),
-                    key=len_lambda
-                ))
+                entry_length = len(max(entry_value.split(u"\n"), key=len_lambda))
+
+            # Adjust column width according to text length.
             if entry_length > column_widths[index]:
                 column_widths[index] = entry_length
 
-            row.append(entry[header])
+            row.append(entry_value)
 
         sheet.append(row)
 

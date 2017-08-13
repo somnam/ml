@@ -9,7 +9,6 @@ import time
 import codecs
 import subprocess
 from datetime import datetime
-from filecache import filecache
 from optparse import OptionParser
 
 import lib.libraries
