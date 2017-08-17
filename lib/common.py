@@ -8,6 +8,7 @@ import simplejson as json
 import cookielib
 import httplib
 import urllib2
+import urlparse
 import codecs
 from BeautifulSoup import BeautifulSoup
 from multiprocessing.dummy import Lock
@@ -123,6 +124,8 @@ def get_parsed_url_response(url, data=None, opener=None, verbose=True):
         verbose=verbose
     )
 
+def get_url_query_string(url):
+    return urlparse.urlparse(url).query
 
 def print_progress(lock=Lock()):
     with lock:

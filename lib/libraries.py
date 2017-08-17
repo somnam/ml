@@ -5,10 +5,15 @@
 import re
 import time
 import socket
-import cookielib
 from fuzzywuzzy import fuzz
 from filecache import filecache
-from lib.common import prepare_opener, open_url, get_json_file, get_parsed_url_response
+from lib.common import (
+    open_url,
+    get_json_file,
+    prepare_opener,
+    get_parsed_url_response,
+    get_url_query_string,
+)
 from lib.automata import (
     browser_start,
     browser_stop,
@@ -32,10 +37,14 @@ class LibraryBase(object):
         self.books   = [] if books is None else books
 
     def init_browser(self):
-        # Request used to initialize cookie.
-        self.cookie_jar = cookielib.CookieJar()
-        self.opener     = prepare_opener(self.data['url'], cookie_jar=self.cookie_jar)
-        open_url(self.data['url'], self.opener)
+        # Request used to initialize opener.
+        self.opener = prepare_opener(self.data['url'])
+
+        # Get query params from redirect.
+        self.query_string = get_url_query_string(
+            # Get redirect url from site response
+            open_url(self.data['url'], self.opener).geturl()
+        )
 
         # Set timeout for request.
         socket.setdefaulttimeout(self.socket_timeout)
@@ -406,21 +415,15 @@ class n5004(LibraryBase):
     def extract_book_info(self, book, results):
         if not (book and results): return
 
-        # Get session cookie.
-        session_cookie = next(
-            (cookie for cookie in self.cookie_jar if cookie.name == 'idses'), None
-        )
-        session_id     = session_cookie.value if session_cookie else None
-
         headers_len, book_info = 5, []
         for match in results:
             onclick_match = self.onclick_re.search(match.get_attribute('onclick'))
             if not onclick_match: continue
 
-            url_suffix, url_params = onclick_match.groups()
+            url_suffix, query_params = onclick_match.groups()
 
-            book_url = '{0}{1}?ID1={2}&ln=pl{3}'.format(
-                self.data['base_url'], url_suffix, session_id, url_params
+            book_url = '{0}{1}?{2}{3}'.format(
+                self.data['base_url'], url_suffix, self.query_string, query_params
             )
 
             response = get_parsed_url_response(book_url, opener=self.opener)
