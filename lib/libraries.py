@@ -17,20 +17,18 @@ from lib.common import (
 from lib.automata import (
     browser_start,
     browser_stop,
-    browser_timeout,
-    browser_select_by_id_and_value,
+    select_by_id_and_value,
     wait_is_visible,
     wait_is_not_visible,
 )
 from selenium.common.exceptions import NoSuchElementException
 from selenium.webdriver.common.keys import Keys
+from selenium.webdriver.common.by import By
 # }}}
 
 LIBRARIES_DATA = get_json_file('opac.json')
 
 class LibraryBase(object):
-    socket_timeout = 10.0
-
     def __init__(self, books=None):
         self.opener  = None
         self.browser = None
@@ -46,9 +44,6 @@ class LibraryBase(object):
             open_url(self.data['url'], self.opener).geturl()
         )
 
-        # Set timeout for request.
-        socket.setdefaulttimeout(self.socket_timeout)
-
         # Try to load browser.
         self.retry_load_browser()
 
@@ -63,6 +58,7 @@ class LibraryBase(object):
                     assert self.data['title'] in self.browser.title
             except socket.timeout:
                 print(u'Browser start timed out.')
+                browser_stop(self.browser)
                 retry_start -= 1
                 if retry_start:
                     print(u'Retry starting browser')
@@ -73,8 +69,6 @@ class LibraryBase(object):
     def stop_browser(self):
         # Quit browser.
         if self.browser: browser_stop(self.browser)
-        # Restore default timeout value.
-        socket.setdefaulttimeout(None)
 
     def get_books_status(self):
         self.init_browser()
@@ -118,7 +112,7 @@ class LibraryBase(object):
                 self.post_process()
             except socket.timeout:
                 print(u'Querying book info timed out.')
-                browser_timeout(self.browser)
+                browser_stop(self.browser)
                 # Remove object.
                 self.browser = None
                 # Retry fetching book with same params and a new browser.
@@ -160,9 +154,16 @@ class n4949(LibraryBase):
     isbn_re  = re.compile('\D+')
     title_re = re.compile('^([^\.]+)')
 
+    autocomp_popup_id  = 'autoc1'
+    results_list_xpath = '//ul[@class="kl"]'
+
     def pre_process(self):
-        # Clear opac site.
-        self.browser.find_element_by_id('form1:textField1').clear()
+        # Clear opac form..
+        try:
+            clear = self.browser.find_element_by_id('form1:btnCzyscForme')
+            clear.click()
+        except NoSuchElementException:
+            pass
 
     def post_process(self):
         # Sleep for short time to avoid frequent requests.
@@ -191,25 +192,26 @@ class n4949(LibraryBase):
         text_field.send_keys(search_value)
 
         # Hide autocomplete popup.
-        autocomplete_popup = 'autoc1'
-        wait_is_visible(self.browser, autocomplete_popup)
-        text_field.send_keys(Keys.ESCAPE)
-        wait_is_not_visible(self.browser, autocomplete_popup)
+        if (wait_is_visible(self.browser, self.autocomp_popup_id)):
+            text_field.send_keys(Keys.ESCAPE)
+            wait_is_not_visible(self.browser, self.autocomp_popup_id)
 
         # Set search type.
-        browser_select_by_id_and_value(self.browser, 'form1:dropdown1', search_type)
+        select_by_id_and_value(self.browser, 'form1:dropdown1', search_type)
 
         # Set resource_type.
-        browser_select_by_id_and_value(self.browser, 'form1:dropdown4', resource_type)
+        select_by_id_and_value(self.browser, 'form1:dropdown4', resource_type)
 
         # Submit form.
         submit = self.browser.find_element_by_id('form1:btnSzukajIndeks')
         submit.click()
 
         # Wait for results to appear.
-        results         = None
-        results_wrapper = self.browser.find_element_by_xpath('//ul[@class="kl"]')
-        if (results_wrapper):
+        results = None
+        if (wait_is_visible(self.browser, self.results_list_xpath, By.XPATH)):
+            results_wrapper = self.browser.find_element_by_xpath(
+                self.results_list_xpath
+            )
             results = results_wrapper.find_elements_by_xpath('li/a')
 
         # Return search results.
@@ -270,8 +272,7 @@ class n4949(LibraryBase):
         if not (book and results):
             return
 
-        re_department = re.compile('\([^\)]+\)')
-        re_address    = re.compile('\,[^\,]+\,')
+        re_not_available = re.compile('Brak\szasobu')
 
         info_by_library = []
         print(u'Fetching %d editions info.' % len(results))
@@ -279,28 +280,45 @@ class n4949(LibraryBase):
             book_url = match.get_attribute('href')
             response = get_parsed_url_response(book_url, opener=self.opener)
 
-            div      = response.find('div', { 'id': 'zasob' })
-            warnings = div.findAll('div', { 'class': 'opis_uwaga' })
-            infos    = [ div.parent for div in warnings ]
+            resource = response.find('div', { 'id': 'zasob' })
+            if (not resource.contents or re_not_available.match(resource.text)):
+                info_by_library.append('Brak zasobu')
+                response.decompose()
+                continue
 
-            # Fetch department, address and availability info.
-            for i in range(len(infos)):
-                info, warning = infos[i].text, warnings[i].text
+            ul = resource.find('ul', { 'class': 'zas_filie' })
+            for li in ul.findAll('li'):
+                department_info = li.find('div', { 'class': 'filia' })
 
-                # Get address string.
-                address = re_address.search(info)
-                if address:
-                    address = address.group().replace(',', '').strip()
+                # Get library address.
+                department, address = '', ''
+                if (department_info and department_info.contents):
+                    department = department_info.contents[0]
+                    location   = (department_info.contents[-1].split(',')
+                                  if department_info.contents[-1] else '')
+                    address    = (location[0] if location else '')
+
                 # Check if address is in accepted list.
                 if not address in self.data['accepted_address']: continue
 
-                # Get department string.
-                department = re_department.search(info)
-                if department:
-                    department = department.group()
-
                 # Get availability info.
-                availability = warning if warning else u'Dostępna'
+                availability_info = li.find('div', { 'class': 'dostepnosc' })
+                availability_info = (availability_info.text.split("\n")
+                                     if availability_info else [])
+
+                warning = li.find('div', { 'class': 'opis_uwaga' })
+
+                not_available_str = u'Pozycja nie do wypożyczenia'
+                not_available     = li.find('img', { 'title': not_available_str })
+
+                # Extract availability string
+                availability = ''
+                if not_available:
+                    availability = not_available_str
+                elif warning and warning.text:
+                    availability = warning.text
+                elif availability_info and availability_info[0]:
+                    availability = availability_info[0].strip()
 
                 info_by_library.append(
                     '%s - %s - %s' % 
@@ -312,16 +330,13 @@ class n4949(LibraryBase):
             # Sleep for short time to avoid frequent requests.
             time.sleep(0.1)
 
-        if info_by_library:
-            print(u'Found match.')
-
         return "\n".join(info_by_library) if info_by_library else None
 
 class n5004(LibraryBase):
     data = LIBRARIES_DATA['5004']
 
     info_re    = re.compile(u'^(.+)\.\s-\s.*$')
-    tr_re      = re.compile(u'^(.+)\s;\sprzeł.*$')
+    tr_re      = re.compile(u'^(.+)\s;\s(?:przeł|\[tł).*$')
     onclick_re = re.compile(u"^javascript:LoadWebPg\('([^']+)',\s'([^']+)'\);.*$")
 
     def pre_process(self):
@@ -346,7 +361,7 @@ class n5004(LibraryBase):
 
         if can_search:
             # Set search type.
-            browser_select_by_id_and_value(self.browser, type_id, type_value)
+            select_by_id_and_value(self.browser, type_id, type_value)
             # Input search value.
             self.browser.find_element_by_id(search_id).send_keys(search_value)
 
@@ -375,7 +390,7 @@ class n5004(LibraryBase):
         try:
            self.browser.find_element_by_class_name('emptyRecord')
         except NoSuchElementException:
-            results = self.browser.find_elements_by_class_name('opisokladka');
+            results = self.browser.find_elements_by_class_name('opisokladka')
 
         return results
 
@@ -431,9 +446,11 @@ class n5004(LibraryBase):
 
             # Extract book info from rows.
             info_table = response.find('table', {'class': 'tabOutWyniki_w'})
-            if not info_table: continue
-            info_rows = info_table.findAll('td', {'class': 'tdOutWyniki_w'})
-            if not info_rows: continue
+            info_rows  = (info_table.findAll('td', {'class': 'tdOutWyniki_w'})
+                          if info_table else None)
+            if not info_rows:
+                response.decompose()
+                continue
 
             # Pack results.
             found_rows_num = len(info_rows) / headers_len
@@ -443,5 +460,7 @@ class n5004(LibraryBase):
                 book_info.append(' '.join(
                     row.text for row in info_rows[range_start:range_end]
                 ))
+
+            response.decompose()
 
         return "\n".join(book_info) if book_info else None

@@ -19,11 +19,18 @@ from selenium.webdriver.firefox.firefox_binary import FirefoxBinary
 def browser_start():
     print(u'Starting browser.')
 
+    # Disable browser auto-updates.
+    profile = webdriver.FirefoxProfile()
+    profile.set_preference('app.update.auto', False)
+    profile.set_preference('app.update.enabled', False)
+    profile.set_preference('app.update.silent', False)
+
     # Load webdriver.
-    binary  = FirefoxBinary(get_file_path('firefox/firefox'))
-    browser = webdriver.Firefox(firefox_binary=binary)
-    # Some of sites elements are loaded via ajax - wait for them.
-    browser.implicitly_wait(2)
+    binary  = FirefoxBinary(get_file_path('./firefox/firefox'))
+    browser = webdriver.Firefox(
+        firefox_profile=profile,
+        firefox_binary=binary,
+    )
     return browser
 
 def browser_stop(browser):
@@ -31,47 +38,28 @@ def browser_stop(browser):
     browser.quit()
     return
 
-def browser_timeout(browser):
-    print('Stopping browser.')
-
-    tempfolder = None
-    if browser.profile and browser.profile.tempfolder:
-        tempfolder = browser.profile.tempfolder
-
-    # Kill current browser instance.
-    if browser.binary:
-        print(u'Killing firefox process "%s".' % browser.binary.process.pid)
-        browser.binary.kill()
-    else:
-        print(u'Killing firefox process.')
-        os.system('pkill -9 firefox')
-
-    # Remove temp folder.
-    if tempfolder:
-        print(u'Removing temporary profile.')
-        time.sleep(0.1)
-        shutil.rmtree(tempfolder)
-
-    return
-
-def browser_select_by_id_and_value(browser, select_id, select_value):
+def select_by_id_and_value(browser, select_id, select_value):
     select = Select(browser.find_element_by_id(select_id))
     select.select_by_value(select_value)
     return select
 
-def wait_is_visible(browser, locator, timeout=5):
+def wait_is_visible(browser, locator, using=By.ID, timeout=5):
     try:
         WebDriverWait(browser, timeout).until(
-            expected_conditions.visibility_of_element_located((By.ID, locator))
+            expected_conditions.visibility_of_element_located(
+                (using, locator)
+            )
         )
         return True
     except (TimeoutException, NoSuchElementException):
         return False
 
-def wait_is_not_visible(browser, locator, timeout=5):
+def wait_is_not_visible(browser, locator, using=By.ID, timeout=5):
     try:
         WebDriverWait(browser, timeout).until_not(
-            expected_conditions.visibility_of_element_located((By.ID, locator))
+            expected_conditions.visibility_of_element_located(
+                (using, locator)
+            )
         )
         return True
     except TimeoutException:

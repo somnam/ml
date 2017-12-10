@@ -6,4 +6,5 @@
 *.json
 *.xls
 *.cache
+*.log
 
