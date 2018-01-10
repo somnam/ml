@@ -342,6 +342,9 @@ def fetch_shelf_list(profile_id, shelf_name=None, shelf_url=None, include_price=
             pager_count, pager_url_base, include_price
         )
 
+    # Filter out empty items.
+    if shelf_books: shelf_books = filter(None, shelf_books)
+
     if shelf_books:
         # Sort books by release or price.
         sort_key     = 'price' if include_price else 'release'

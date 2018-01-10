@@ -13,10 +13,12 @@ from lib.common import (
     prepare_opener,
     get_parsed_url_response,
     get_url_query_string,
+    get_url_net_location,
 )
 from lib.automata import (
     browser_start,
     browser_stop,
+    set_input_value,
     select_by_id_and_value,
     wait_is_visible,
     wait_is_not_visible,
@@ -34,15 +36,21 @@ class LibraryBase(object):
         self.browser = None
         self.books   = [] if books is None else books
 
+    def pre_process(self):
+        pass
+
     def init_browser(self):
         # Request used to initialize opener.
         self.opener = prepare_opener(self.data['url'])
 
+        # Get redirect url from site response
+        redirect_url = open_url(self.data['url'], self.opener).geturl()
+
+        # Get base url from redirect.
+        self.net_location = get_url_net_location(redirect_url)
+
         # Get query params from redirect.
-        self.query_string = get_url_query_string(
-            # Get redirect url from site response
-            open_url(self.data['url'], self.opener).geturl()
-        )
+        self.query_string = get_url_query_string(redirect_url)
 
         # Try to load browser.
         self.retry_load_browser()
@@ -52,7 +60,6 @@ class LibraryBase(object):
         while not self.browser and retry_start:
             try:
                 self.browser = browser_start()
-                print(u'Loading search form.')
                 self.browser.get(self.data['url'])
                 if 'title' in self.data and self.data['title']:
                     assert self.data['title'] in self.browser.title
@@ -131,7 +138,7 @@ class LibraryBase(object):
 
         return {
             'author': book['author'],
-            'title' : '"%s"' % book['title'],
+            'title' : u'"{0}"'.format(book['title']),
             'info'  : book_info if book_info else "Brak",
             'pages' : book['pages'],
             'link'  : book['url'],
@@ -151,19 +158,12 @@ class LibraryBase(object):
 class n4949(LibraryBase):
     data = LIBRARIES_DATA['4949']
 
-    isbn_re  = re.compile('\D+')
-    title_re = re.compile('^([^\.]+)')
+    isbn_re    = re.compile('\D+')
+    section_re = re.compile('\([^\)]+\)')
 
-    autocomp_popup_id  = 'autoc1'
-    results_list_xpath = '//ul[@class="kl"]'
-
-    def pre_process(self):
-        # Clear opac form..
-        try:
-            clear = self.browser.find_element_by_id('form1:btnCzyscForme')
-            clear.click()
-        except NoSuchElementException:
-            pass
+    search_type_id     = 'form1:dropdown1'
+    resource_type_id   = 'form1:dropdown4'
+    clear_button_id    = 'form1:btnCzyscForme'
 
     def post_process(self):
         # Sleep for short time to avoid frequent requests.
@@ -180,47 +180,106 @@ class n4949(LibraryBase):
     # 9  - Magazine
     # 15 - Audiobook
     def query_book(self, book, search_field):
-        search_value = book[search_field]
-        search_type, resource_type = None, None
-        if search_field == 'isbn':
-            search_type, resource_type = '3', '2'
-        elif search_field == 'title':
-            search_type, resource_type = '2', '2'
+        return (self.query_book_by_isbn(book)
+                if search_field == 'isbn'
+                else self.query_book_by_title(book))
+
+    def select_form(self, form_type):
+        # Select standard or advanced form.
+        links_wrapper = self.browser.find_element_by_class_name('historia')
+        for link in links_wrapper.find_elements_by_tag_name('a'):
+            if link.text != form_type: continue
+            link.click()
+            break
+
+        # Clear form before using.
+        if (wait_is_visible(self.browser, self.clear_button_id)):
+            clear = self.browser.find_element_by_id(self.clear_button_id)
+            clear.click()
+
+        return
+
+    def hide_autocomplete_popup(self, text_field_id, autocomp_popup_id):
+        if (wait_is_visible(self.browser, autocomp_popup_id)):
+            text_field = self.browser.find_element_by_id(text_field_id)
+            text_field.send_keys(Keys.ESCAPE)
+            wait_is_not_visible(self.browser, autocomp_popup_id)
+
+    def query_book_by_isbn(self, book):
+        search_type        = '3'
+        resource_type      = '2'
+        submit_button_id   = 'form1:btnSzukajIndeks'
+        results_list_xpath = '//ul[@class="kl"]'
+
+        # Select standard form.
+        self.select_form(u'Indeks')
 
         # Input search value.
-        text_field = self.browser.find_element_by_id('form1:textField1')
-        text_field.send_keys(search_value)
+        set_input_value(self.browser, 'form1:textField1', book['isbn'])
 
         # Hide autocomplete popup.
-        if (wait_is_visible(self.browser, self.autocomp_popup_id)):
-            text_field.send_keys(Keys.ESCAPE)
-            wait_is_not_visible(self.browser, self.autocomp_popup_id)
+        self.hide_autocomplete_popup('form1:textField1', 'autoc1')
 
         # Set search type.
-        select_by_id_and_value(self.browser, 'form1:dropdown1', search_type)
+        select_by_id_and_value(self.browser, self.search_type_id, search_type)
 
         # Set resource_type.
-        select_by_id_and_value(self.browser, 'form1:dropdown4', resource_type)
+        select_by_id_and_value(self.browser, self.resource_type_id, resource_type)
 
         # Submit form.
-        submit = self.browser.find_element_by_id('form1:btnSzukajIndeks')
-        submit.click()
-
-        # Wait for results to appear.
         results = None
-        if (wait_is_visible(self.browser, self.results_list_xpath, By.XPATH)):
-            results_wrapper = self.browser.find_element_by_xpath(
-                self.results_list_xpath
-            )
-            results = results_wrapper.find_elements_by_xpath('li/a')
+        if (wait_is_visible(self.browser, submit_button_id)):
+            submit = self.browser.find_element_by_id(submit_button_id)
+            submit.click()
+
+            # Wait for results to appear.
+            if (wait_is_visible(self.browser, results_list_xpath, By.XPATH)):
+                results_wrapper = self.browser.find_element_by_xpath(
+                    results_list_xpath
+                )
+                results = results_wrapper.find_elements_by_xpath('li/a')
+
+        # Return search results.
+        return results
+
+    def query_book_by_title(self, book):
+        resource_type    = '2'
+        submit_button_id = 'form1:btnSzukajOpisow'
+
+        # Select advanced form.
+        self.select_form(u'Złożone')
+
+        # Input book author.
+        author_name_list = book['author'].split(' ')
+        author_string    = u'{0}, {1}'.format(
+            author_name_list.pop(),
+            ' '.join(author_name_list)
+        )
+        set_input_value(self.browser, 'form1:textField1', author_string)
+        # Hide autocomplete popup.
+        self.hide_autocomplete_popup('form1:textField1', 'autoc1')
+
+        # Input book title.
+        set_input_value(self.browser, 'form1:textField2', book['title'])
+        # Hide autocomplete popup.
+        self.hide_autocomplete_popup('form1:textField2', 'autoc2')
+
+        # Set resource_type.
+        select_by_id_and_value(self.browser, self.resource_type_id, resource_type)
+
+        results = None
+        if (wait_is_visible(self.browser, submit_button_id)):
+            submit = self.browser.find_element_by_id(submit_button_id)
+            submit.click()
+
+            if (wait_is_visible(self.browser, 'opisy')):
+                results = self.browser.find_elements_by_class_name('opis')
 
         # Return search results.
         return results
 
     def get_matching_result(self, book, search_field, results):
-        if not results:
-            print(u'No match found.')
-            return
+        if not results: return
 
         return (self.get_matching_result_isbn(book, results) 
                 if search_field == 'isbn'
@@ -229,7 +288,6 @@ class n4949(LibraryBase):
     def get_matching_result_isbn(self, book, results):
         match_value = book['isbn'].replace('-', '')
 
-        print(u'Matching for value by field "isbn".')
         matching = []
         for elem in results:
             # Replace all non-numeric characters in isbn.
@@ -244,15 +302,14 @@ class n4949(LibraryBase):
     def get_matching_result_title(self, book, results):
         match_value = book['title']
 
-        print(u'Matching for value by field "title".')
         matching = []
         for elem in results:
-            elem_value  = elem.text.strip()
-            match_ratio = fuzz.partial_ratio(match_value, elem_value)
-
-            if match_ratio < 95: continue
-            matching = self.extract_matching_results(elem)
-            break
+            book_id = elem.get_attribute('id').replace('dvop', '')
+            matching.append('{0}{1}{2}'.format(
+                self.net_location,
+                self.data['book_url_suffix'],
+                book_id
+            ))
 
         return matching
 
@@ -262,9 +319,10 @@ class n4949(LibraryBase):
                       .find_element_by_class_name('zawartosc')
         results = []
         try:
-            results = content.find_elements_by_tag_name('a')
+            results = [match.get_attribute('href') 
+                       for match in content.find_elements_by_tag_name('a')]
         except NoSuchElementException:
-            print(u'Empty results list.')
+            pass
 
         return results
 
@@ -272,17 +330,16 @@ class n4949(LibraryBase):
         if not (book and results):
             return
 
-        re_not_available = re.compile('Brak\szasobu')
+        re_unavailable = re.compile('Brak\szasobu')
 
         info_by_library = []
-        print(u'Fetching %d editions info.' % len(results))
-        for match in results:
-            book_url = match.get_attribute('href')
+        for book_url in results:
             response = get_parsed_url_response(book_url, opener=self.opener)
-
             resource = response.find('div', { 'id': 'zasob' })
-            if (not resource.contents or re_not_available.match(resource.text)):
-                info_by_library.append('Brak zasobu')
+            if (not resource or
+                not resource.contents or
+                re_unavailable.match(resource.text)
+            ):
                 response.decompose()
                 continue
 
@@ -320,10 +377,14 @@ class n4949(LibraryBase):
                 elif availability_info and availability_info[0]:
                     availability = availability_info[0].strip()
 
-                info_by_library.append(
-                    '%s - %s - %s' % 
-                    (department, address, availability)
-                )
+                # Extract section name.
+                section_info  = (warning.previous.strip() if warning.previous else '')
+                section_match = self.section_re.search(section_info)
+                section       = (section_match.group() if section_match else '')
+
+                info_by_library.append(u'{0} - {1} - {2} - {3}'.format(
+                    department, address, section, availability
+                ))
 
             response.decompose()
 
@@ -363,7 +424,9 @@ class n5004(LibraryBase):
             # Set search type.
             select_by_id_and_value(self.browser, type_id, type_value)
             # Input search value.
-            self.browser.find_element_by_id(search_id).send_keys(search_value)
+            self.browser.find_element_by_id(search_id).send_keys(
+                search_value
+            )
 
         return can_search
 

@@ -17,6 +17,11 @@ from multiprocessing.dummy import Lock
 def get_file_path(file_name):
     return os.path.join(os.getcwd(), file_name)
 
+def remove_file(file_name):
+    file_path = get_file_path(file_name)
+    if os.path.isfile(file_path):
+        os.remove(file_path)
+
 def make_dir_if_not_exists(dir_path):
     if not os.path.exists(dir_path):
         try:
@@ -126,6 +131,10 @@ def get_parsed_url_response(url, data=None, opener=None, verbose=True):
 
 def get_url_query_string(url):
     return urlparse.urlparse(url).query
+
+def get_url_net_location(url):
+    parser = urlparse.urlparse(url)
+    return '{0}://{1}/'.format(parser.scheme, parser.netloc)
 
 def print_progress(lock=Lock()):
     with lock:
