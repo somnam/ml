@@ -1,145 +1,64 @@
-#!/usr/bin/pyth n -tt
 # -*- coding: utf-8 -*-
 
 # Import {{{
-import sys
-from gdata.spreadsheets.client import SpreadsheetsClient, SpreadsheetQuery, CellQuery
-from gdata.spreadsheets.data import BuildBatchCellsUpdate
+import gspread
+from gspread.exceptions import SpreadsheetNotFound, WorksheetNotFound
 from oauth2client.service_account import ServiceAccountCredentials
-from httplib2 import Http
 # }}}
 
-class TokenFromOAuth2Creds:
-    def __init__(self, creds):
-        self.creds = creds
+def get_service_client(auth):
+    if not auth: return
 
-    def modify_request(self, reqest):
-        if (
-            self.creds.access_token_expired or 
-            not self.creds.access_token_expired
-        ):
-            self.creds.refresh(Http())
-        self.creds.apply(reqest.headers)
+    credentials = ServiceAccountCredentials.from_json_keyfile_name(auth, [
+        'https://spreadsheets.google.com/feeds',
+        'https://www.googleapis.com/auth/drive',
+    ])
+    return gspread.authorize(credentials)
 
-def connect_to_service(auth_file):
-    if not auth_file:
-        return
+def get_writable_worksheet(client, workbook_title, worksheet_title, rows_n, cols_n):
+    if not client: return
 
-    scope       = ['https://spreadsheets.google.com/feeds']
-    credentials = ServiceAccountCredentials.from_json_keyfile_name(
-        auth_file, scope
-    )
-    client      = SpreadsheetsClient(
-        auth_token=TokenFromOAuth2Creds(credentials)
-    )
+    try:
+        workbook = client.open(workbook_title)
+    except SpreadsheetNotFound:
+        workbook = client.create(title=workbook_title)
 
-    return client
-
-def get_service_client(auth_file):
-    # Connect to spreadsheet service.
-    return connect_to_service(auth_file)
-
-def get_sheet_id(sheet):
-    return sheet.id.text.rsplit('/', 1)[-1] if sheet else None
-
-def retrieve_spreadsheet_id(client, title):
-    if not client:
-        return
-
-    query      = SpreadsheetQuery(title=title)
-    sheet_feed = client.get_spreadsheets(query=query)
-
-    spreadsheet_id = None
-    if sheet_feed.entry:
-        spreadsheet     = sheet_feed.entry[0]
-        spreadsheet_id  = get_sheet_id(spreadsheet)
-
-    return spreadsheet_id
-
-def get_writable_worksheet(client, spreadsheet_id, worksheet_name,
-                           row_count=100, col_count=20):
-
-    # Used for name comparison.
-    stdin_enc = sys.stdin.encoding
-
-    # Get worksheet for given name.
-    work_feed = client.GetWorksheets(spreadsheet_id)
-    worksheet = None
-    for worksheet_entry in work_feed.entry:
-        worksheet_entry_name = worksheet_entry.title.text
-        if worksheet_entry_name == worksheet_name:
-            worksheet = worksheet_entry
-            break
-
-    # Update - delete + insert new.
-    if worksheet: client.Delete(worksheet)
-
-    # Create new worksheet.
-    worksheet = client.AddWorksheet(
-        spreadsheet_id,
-        worksheet_name,
-        row_count,
-        col_count,
-    )
+    try:
+        worksheet = workbook.worksheet(title=worksheet_title)
+    except WorksheetNotFound:
+        # Create new worksheet.
+        worksheet = workbook.add_worksheet(title=worksheet_title, rows=rows_n, cols=cols_n)
+    else:
+        # Clear existing worksheet
+        worksheet.clear()
+        # Check if all rows will fit.
+        if ((rows_n - worksheet.row_count) or (cols_n - worksheet.col_count)):
+            worksheet.resize(rows=rows_n, cols=cols_n)
+            # Fetch updated worksheet after resizing.
+            worksheet = workbook.worksheet(title=worksheet.title)
 
     return worksheet
 
-def get_writable_cells(client, spreadsheet_id, dst_worksheet,
-                       return_empty='true', **kwargs):
+def write_to_cells(worksheet, rows):
+    if not(worksheet and rows): return
 
-    query = CellQuery(return_empty=return_empty, **kwargs)
-    return client.GetCells(spreadsheet_id, get_sheet_id(dst_worksheet), q=query)
+    # Get cells for writing rows.
+    cells = worksheet.range(1, 1, worksheet.row_count, worksheet.col_count)
 
-def write_to_cells(client, spreadsheet_id, dst_worksheet, dst_cells, rows):
-    # Prepare request that will be used to update worksheet cells.
-    batch_request = BuildBatchCellsUpdate(spreadsheet_id, get_sheet_id(dst_worksheet))
-
-    # Write rows to destination worksheet.
+    # Update each destination cell.
     cell_index = 0
     for row in rows:
-        # Update each destination cell.
         for value in row:
-            # Get destination cell.
-            dst_cell = dst_cells.entry[cell_index]
-            # Update cell value.
-            dst_cell.cell.input_value = value
-            # Set cell for update.
-            batch_request.AddBatchEntry(
-                dst_cell, operation_string='update'
-            )
-            # Go to next cell.
+            cells[cell_index].value = value
             cell_index += 1
 
     # Execute batch update of destination cells.
-    return client.batch(batch_request)
+    worksheet.update_cells(cells)
 
-def write_rows_to_worksheet(client, spreadsheet_title, worksheet_name, rows):
-    if not rows: return
+def write_rows_to_worksheet(client, workbook_title, worksheet_title, rows):
+    if not(client and rows): return
 
-    # Get worksheet id.
-    spreadsheet_id = retrieve_spreadsheet_id(client, spreadsheet_title)
-
-    # Get worksheet for writing rows.
-    dst_worksheet = get_writable_worksheet(
-        client,
-        spreadsheet_id,
-        worksheet_name,
-        row_count=len(rows),
-        col_count=len(rows[0])
+    worksheet = get_writable_worksheet(
+        client, workbook_title, worksheet_title, len(rows), len(rows[0])
     )
-
-    # Get cells for Writing rows.
-    dst_cells = get_writable_cells(
-        client,
-        spreadsheet_id,
-        dst_worksheet,
-    )
-
-    write_to_cells(
-        client,
-        spreadsheet_id,
-        dst_worksheet,
-        dst_cells,
-        rows
-    )
-
+    write_to_cells(worksheet, rows)

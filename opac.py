@@ -1,4 +1,3 @@
-#!/usr/bin/python2 -tt
 # -*- coding: utf-8 -*-
 
 # Import {{{
@@ -21,7 +20,7 @@ from lib.xls import make_xls
 # }}}
 
 # Lovely constants.
-WORKSHEET_HEADERS = (u'author', u'title', u'info', u'pages', u'link')
+WORKSHEET_HEADERS = ('author', 'title', 'info', 'pages', 'link')
 
 def get_books_status(books_list, library):
     if not books_list: return
@@ -48,14 +47,12 @@ def get_books_list(file_name):
 
     return books_list
 
-def write_books_to_gdata(auth_data, shelf_name, books_status):
-    # Fetch gdata client.
+def write_books_to_google_docs(auth_data, shelf_name, worksheet_title, books_status):
+    # Fetch google_docs client.
     print("Authenticating to Google service.")
     client = get_service_client(auth_data)
 
     # Fetch spreadsheet params.
-    spreadsheet_title  = u'Karty'
-
     books_status = [
         [book[header] for header in WORKSHEET_HEADERS]
         for book in books_status
@@ -64,7 +61,7 @@ def write_books_to_gdata(auth_data, shelf_name, books_status):
     print("Writing books.")
     write_rows_to_worksheet(
         client,
-        spreadsheet_title,
+        worksheet_title,
         get_worksheet_name(shelf_name),
         books_status,
     )
@@ -93,7 +90,7 @@ def refresh_books_list(source, profile_id):
 
 def main():
     # Fetch library data.
-    libraries_data = get_json_file('opac.json')
+    config = get_json_file('opac.json')
 
     # Cmd options parser
     option_parser = OptionParser()
@@ -103,7 +100,7 @@ def main():
     option_parser.add_option("-a", "--auth-data")
 
     # Add library option.
-    library_choices = libraries_data.keys()
+    library_choices = [*config['libraries']]
     option_parser.add_option(
         "-l",
         "--library",
@@ -120,33 +117,34 @@ def main():
         exit(-1)
 
     # Get source file for library.
-    library_data = libraries_data[options.library]
+    library_data = config['libraries'][options.library]
     books_source = library_data['source']
 
     if options.refresh:
-        print(u'Updating list of books from source "%s".' % books_source)
-        refresh_books_list(books_source, libraries_data['profile_id'])
+        print('Updating list of books from source "%s".' % books_source)
+        refresh_books_list(books_source, config['profile_id'])
 
     books_source_file = get_books_source_file(books_source)
 
     # Read in books list.
-    print(u'Reading in books list.')
+    print('Reading in books list.')
     books_list = get_books_list(books_source_file)
 
     # Fetch books library status.
-    print(u'Fetching {0} books library status.'.format(len(books_list)))
+    print('Fetching {0} books library status.'.format(len(books_list)))
     books_status = get_books_status(books_list, options.library)
 
     # Check results list.
     if not books_status:
-        print(u'No library status found.')
+        print('No library status found.')
         exit(-1)
 
     # Write books status.
     if options.auth_data:
-        write_books_to_gdata(
-            options.auth_data, books_source, books_status
-        )
+        write_books_to_google_docs(options.auth_data,
+                                   books_source,
+                                   config['worksheet_title'],
+                                   books_status)
     else:
         write_books_to_xls(
             books_source, books_status

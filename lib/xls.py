@@ -1,4 +1,3 @@
-#!/usr/bin/pyth n -tt
 # -*- coding: utf-8 -*-
 
 # Import {{{

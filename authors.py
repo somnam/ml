@@ -1,4 +1,3 @@
-#!/usr/bin/pyth n -tt
 # -*- coding: utf-8 -*-
 
 # Import {{{
@@ -7,7 +6,6 @@ import sys
 import json
 import urllib
 import urllib2
-import gdata.spreadsheet.service
 from filecache import filecache
 from optparse import OptionParser
 from multiprocessing.dummy import Pool, Lock, cpu_count
@@ -55,11 +53,11 @@ def get_author_info(author):
     info_url = None
     if response:
         # Find book author(s).
-        author_spans = response.findAll('span', {'itemprop': 'author'})
+        author_spans = response.find_all('span', {'itemprop': 'author'})
         if author_spans:
             # Match for current author.
             for span in author_spans:
-                for a in span.findAll('a', {'class': 'authorName'}):
+                for a in span.find_all('a', {'class': 'authorName'}):
                     # Get author href.
                     if a.text.encode('utf-8') == author:
                         info_url = a['href']
@@ -76,7 +74,7 @@ def get_author_info(author):
             birth_place = response.first('div', text=u'born')
             if birth_place:
                 # Striptease.
-                birth_place = birth_place.next.strip().split(',').pop().strip().replace('in ', '')
+                birth_place = birth_place.next_element.strip().split(',').pop().strip().replace('in ', '')
             response.decompose()
 
     with LOCK:

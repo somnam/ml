@@ -1,23 +1,21 @@
-#!/usr/bin/pyth n -tt
 # -*- coding: utf-8 -*-
 
 # Import {{{
 import re
-import urllib
-import simplejson as json
-# import time
+import json
 from operator import itemgetter
-from multiprocessing.dummy import Pool, cpu_count
-from filecache import filecache
+from multiprocessing import cpu_count
+from multiprocessing.dummy import Pool
+from filecache import filecache, HOUR, MONTH
 # TODO: Deprecated, use argparse instead.
 from optparse import OptionParser
-# from datetime import datetime
 from lib.common import (
     get_file_path,
     get_json_file,
     dump_json_file,
     prepare_opener,
     open_url,
+    build_url,
     get_url_response,
     get_parsed_url_response,
     print_progress,
@@ -29,7 +27,7 @@ config = get_json_file('imogeen.json')
 
 to_read_class_re       = re.compile('shelf-name')
 book_original_title_re = re.compile('tytu?')
-book_pages_no_re       = re.compile('liczba stron')
+book_pages_num_re       = re.compile('liczba stron')
 book_subtitle_re       = re.compile('^([^\.]+)(?:\.\s(.*))?$')
 
 def prepare_lc_opener():
@@ -114,7 +112,7 @@ def get_pager_info(shelf_page, shelf_page_url):
         pager = shelf_page.find('table', { 'class': 'pager-default' })
         if pager:
             pager_cell     = pager.find('td', { 'class': 'centered' })
-            pager_tags     = pager_cell.findAll('a')
+            pager_tags     = pager_cell.find_all('a')
             last_pager_tag = pager_tags.pop()
 
             # Get pages count
@@ -141,14 +139,14 @@ def progress_books_on_page(pager_url):
 
 
 # Invalidate values after 6 hours.
-@filecache(6 * 60 * 60)
+@filecache(6 * HOUR)
 def get_books_on_page(pager_url):
     """Get list of books on current page."""
     
     books = None
     if pager_url:
         pager_page = get_parsed_lc_url_response(pager_url)
-        book_tags  = pager_page.findAll(
+        book_tags  = pager_page.find_all(
             'a',
             { 'class' : 'withTipFixed' }
         )
@@ -158,12 +156,12 @@ def get_books_on_page(pager_url):
     return books
 
 def progress_book_info(book_url):
-    book_info = get_book_info(book_url)
+    book_info_json = get_book_info(book_url)
     print_progress()
-    return book_info
+    return json.loads(book_info_json)
 
 # Invalidate values after 30 days.
-@filecache(30 * 24 * 60 * 60)
+@filecache(MONTH)
 def get_book_info(book_url):
     """Get all kinds of info on book."""
 
@@ -171,72 +169,71 @@ def get_book_info(book_url):
 
     book_info = None
     if book_page:
-
         # Get book title and author from breadcrumbs.
-        breadcrumbs = book_page.find('ul', { 'class': 'breadcrumb' }).findAll('li')
-        book_title  = breadcrumbs.pop()
-        book_author = breadcrumbs.pop().find('a')
+        breadcrumbs = book_page.find('ul', { 'class': 'breadcrumb' }).find_all('li')
+        book_title  = breadcrumbs.pop().text
+        book_author = breadcrumbs.pop().find('a').text
 
         # Get book details.
-        book_details  = book_page.find('div', { 'id': 'dBookDetails' })
-        book_category = book_details.find('a', { 'itemprop': 'genre' })
-        book_isbn     = book_details.find('span', { 'itemprop': 'isbn' })
-        book_release  = book_details.find('dd', { 'itemprop': 'datePublished' })
+        book_details     = book_page.find('div', { 'id': 'dBookDetails' })
+        book_category    = book_details.find('a', { 'itemprop': 'genre' }).text
+        # These values may not be present
+        book_isbn_tag    = book_details.find('span', { 'itemprop': 'isbn' })
+        book_release_tag = book_details.find('dd', { 'itemprop': 'datePublished' })
 
-        # Get original title if present.
-        book_original_title     = None
-        # Get pages number.
-        book_pages_no    = None
-        for div in book_details.findAll('div', { 'class': 'profil-desc-inline' }):
+        # Get original title and pages number if present.
+        book_original_title, book_pages_num = None, None
+        for div in book_details.find_all('div', { 'class': 'profil-desc-inline' }):
             if div.find(text=book_original_title_re):
-                book_original_title = div.find('dd').string
-            elif div.find(text=book_pages_no_re):
-                book_pages_no = div.find('dd').string
+                book_original_title = div.find('dd').text.strip()
+            elif div.find(text=book_pages_num_re):
+                book_pages_num = div.find('dd').text
 
-
-        subtitle_result = book_subtitle_re.search(book_title.string)
+        # Search for book subtitle.
+        book_subtitle   = None
+        subtitle_result = book_subtitle_re.search(book_title)
         if subtitle_result:
-            title, subtitle = subtitle_result.groups()
-        else:
-            title, subtitle = book_title.string, None
+            book_title, book_subtitle = subtitle_result.groups()
 
         book_info = {
-            'title'             : title,
-            'subtitle'          : subtitle,
+            'title'             : book_title,
+            'subtitle'          : book_subtitle,
             'original_title'    : book_original_title,
-            'author'            : book_author.string,
-            'category'          : book_category.string,
-            # ISBN is not always present.
-            'isbn'              : book_isbn.string if book_isbn else None,
-            'pages'             : book_pages_no,
+            'author'            : book_author,
+            'category'          : book_category,
+            'pages'             : book_pages_num,
             'url'               : book_url,
-            'release'           : book_release['content'] if book_release else None,
+            # ISBN and release date are not always present.
+            'isbn'              : book_isbn_tag.text if book_isbn_tag else None,
+            'release'           : book_release_tag['content'] if book_release_tag else None,
         }
 
         book_page.decompose()
 
-    return book_info
+    return json.dumps(book_info) if book_info else None
 
 def progress_book_price(book_info):
-    url = '{0}?{1}'.format(config['bb_url'], urllib.urlencode({
+    book_info['price'] = get_book_price(get_book_price_url(book_info))
+    print_progress()
+    return
+
+def get_book_price_url(book_info):
+    return build_url(config['bb_url'], {
         'name':        book_info['title'],
         'info':        book_info['author'],
         'number':      book_info['isbn'],
         'skip_jQuery': '1',
-    }))
-    book_info['price'] = get_book_price(url)
-    print_progress()
-    return
+    })
 
 # Invalidate values after 30 days.
-@filecache(30 * 24 * 60 * 60)
 def get_book_price(url):
     """Get book price."""
 
     response      = get_url_response(url)
-    response_json = json.load(response) if response else None
+    response_json = (json.loads(response.read().decode('utf-8'))
+                     if response else None)
 
-    book_price    = None
+    book_price    = 0.0
     if response_json and 'status' in response_json and response_json['status']:
         entries = (response_json['data'].values()
                    if type(response_json['data']) is dict
@@ -247,7 +244,7 @@ def get_book_price(url):
                    entry['type'] == 'book' and
                    entry['name'] in config['retailers']):
                 continue
-            book_price = (entry['price']
+            book_price = (float(entry['price'])
                           if 'price' in entry and entry['price']
                           else None)
             break
@@ -328,7 +325,7 @@ def fetch_shelf_list(profile_id, shelf_name=None, shelf_url=None, include_price=
         # Make 'to read' url
         shelf_url = get_shelf_url(library_page, shelf_name)
 
-    shelf_books = None
+    shelf_books = []
     if shelf_url:
         # Fetch 'to read' books list
         shelf_page = get_parsed_lc_url_response(shelf_url)
@@ -342,11 +339,12 @@ def fetch_shelf_list(profile_id, shelf_name=None, shelf_url=None, include_price=
             pager_count, pager_url_base, include_price
         )
 
-    # Filter out empty items.
-    if shelf_books: shelf_books = filter(None, shelf_books)
-
     if shelf_books:
+        # Filter out empty items.
+        shelf_books = [book for book in shelf_books if book]
+
         # Sort books by release or price.
+        print("Sorting %d books." % len(shelf_books))
         sort_key     = 'price' if include_price else 'release'
         reverse_sort = False if sort_key == 'price' else True
         shelf_books.sort(key=itemgetter(sort_key), reverse=reverse_sort)
@@ -377,7 +375,7 @@ def fetch_shelves_info(profile_id, skip_library_shelf=True):
         if shelves_list:
             library_re = get_library_re() if skip_library_shelf else None
 
-            for shelf in shelves_list.findAll('a', { 'class': re.compile('shelf') }):
+            for shelf in shelves_list.find_all('a', { 'class': re.compile('shelf') }):
                 shelf_url = get_shelf_list_url(get_site_url(shelf['href']))
 
                 # Skip library shelf.
@@ -386,7 +384,7 @@ def fetch_shelves_info(profile_id, skip_library_shelf=True):
 
                 shelf_name = shelf['href'].split('/')[-2]
                 shelves_info.append({
-                    'title':    shelf.string,
+                    'title':    shelf.text,
                     'name':     shelf_name,
                     'filename': '%s_%s.json' % (profile_name, shelf_name),
                     'url':      shelf_url,
@@ -452,7 +450,4 @@ def main():
             )
 
 if __name__ == "__main__":
-    # start_time = datetime.now()
     main()
-    # print("Run time:")
-    # print(datetime.now() - start_time)

@@ -11,7 +11,7 @@ import urllib2
 import threading
 from optparse import OptionParser
 from urlparse import urlparse
-from filecache import filecache
+from filecache import filecache, YEAR
 from lib.common import (
     get_parsed_url_response,
     get_file_path,
@@ -105,7 +105,7 @@ def filter_nomnom_page(recipe_url_value, contains_re, filter_re):
     return filtered_recipe
 
 # Invalidate values after a year
-@filecache(365 * 24 * 60 * 60)
+@filecache(YEAR)
 def get_nomnom_page(recipe_url):
     # Get BeautifulSoup page instance.
     parser = get_parsed_url_response(recipe_url, verbose=False)
@@ -113,35 +113,37 @@ def get_nomnom_page(recipe_url):
     page = None
     if parser and parser.find('body'):
         # Don't search in header.
-        parser = parser.find('body')
+        body = parser.find('body')
 
         # Remove <script> tags from page.
-        [script.extract() for script in parser.findAll('script')]
+        [script.extract() for script in body.find_all('script')]
 
         # Remove <a> tags from page.
-        [a.extract() for a in parser.findAll('a')]
+        [a.extract() for a in body.find_all('a')]
 
         # Remove <form> tags from page.
-        [form.extract() for form in parser.findAll('form')]
+        [form.extract() for form in body.find_all('form')]
 
         # Remove all hidden items.
-        [elem.extract() for elem in parser.findAll(None, { 'display': 'none' })]
+        [elem.extract() for elem in body.find_all(None, { 'display': 'none' })]
 
         # Remove comments.
         comments = ('comment', 'koment')
         for comment in comments:
             comment_re = re.compile('.*' + comment + '.*', re.I)
-            [elem.extract() for elem in parser.findAll(
+            [elem.extract() for elem in body.find_all(
                 None,
                 { 'id': comment_re }
             )]
-            [elem.extract() for elem in parser.findAll(
+            [elem.extract() for elem in body.find_all(
                 None,
                 { 'class': comment_re }
             )]
 
         # Convert back to string and zip.
-        page = zlib.compress(unicode(parser).encode('utf-8'))
+        page = zlib.compress(unicode(body).encode(STDIN_ENC))
+
+    if parser: parser.decompose()
 
     return page
 
@@ -276,7 +278,7 @@ def main():
     else:
         decode_options(options)
 
-        # Fetch gdata client.
+        # Fetch google_docs client.
         print(u'Authenticating to Google service.')
         client = get_service_client(options.auth_data)
 

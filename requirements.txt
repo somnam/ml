@@ -1,0 +1,9 @@
+beautifulsoup4
+filecache
+fuzzywuzzy
+lxml
+oauth2client
+gspread
+openpyxl
+python-Levenshtein
+selenium == 3.*

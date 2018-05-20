@@ -1,12 +1,13 @@
-#!/usr/bin/python -tt
 # -*- coding: utf-8 -*-
 
 # Import {{{
 import re
+import json
 import time
 import socket
+from math import floor
 from fuzzywuzzy import fuzz
-from filecache import filecache
+from filecache import filecache, DAY
 from lib.common import (
     open_url,
     get_json_file,
@@ -28,13 +29,17 @@ from selenium.webdriver.common.keys import Keys
 from selenium.webdriver.common.by import By
 # }}}
 
-LIBRARIES_DATA = get_json_file('opac.json')
+LIBRARIES_DATA = get_json_file('opac.json')['libraries']
 
 class LibraryBase(object):
     def __init__(self, books=None):
         self.opener  = None
         self.browser = None
         self.books   = [] if books is None else books
+
+    @property
+    def books_by_isbn(self):
+        return {book['isbn']: book for book in self.books}
 
     def pre_process(self):
         pass
@@ -64,11 +69,11 @@ class LibraryBase(object):
                 if 'title' in self.data and self.data['title']:
                     assert self.data['title'] in self.browser.title
             except socket.timeout:
-                print(u'Browser start timed out.')
+                print('Browser start timed out.')
                 browser_stop(self.browser)
                 retry_start -= 1
                 if retry_start:
-                    print(u'Retry starting browser')
+                    print('Retry starting browser')
                 else:
                     print(u"Browser start failed.")
                     raise
@@ -85,17 +90,17 @@ class LibraryBase(object):
         # Will contain books info.
         books_status = []
         for book in self.books:
-            book_info = cached_book_info_wrapper(book)
-            books_status.append(book_info)
+            book_info_json = cached_book_info_wrapper(book['isbn'])
+            books_status.append(json.loads(book_info_json))
 
         self.stop_browser()
 
         return books_status
 
     def cached_book_info_wrapper(self):
-        @filecache(24 * 60 * 60)
-        def get_cached_book_info(book):
-            return self.get_book_info(book)
+        @filecache(DAY)
+        def get_cached_book_info(isbn):
+            return self.get_book_info(self.books_by_isbn[isbn])
         return get_cached_book_info
 
     def get_book_info(self, book):
@@ -118,7 +123,7 @@ class LibraryBase(object):
                 book_info = self.query_book_info(book, search_field)
                 self.post_process()
             except socket.timeout:
-                print(u'Querying book info timed out.')
+                print('Querying book info timed out.')
                 browser_stop(self.browser)
                 # Remove object.
                 self.browser = None
@@ -129,23 +134,23 @@ class LibraryBase(object):
                 retry_fetch -= 1
 
             if book_info:
-                print(u'Successfully queried book info.')
+                print('Successfully queried book info.')
                 break
             elif retry_fetch:
-                print(u'Retry book fetching.')
+                print('Retry book fetching.')
             else:
-                print(u'Book fetching failed.')
+                print('Book fetching failed.')
 
-        return {
+        return json.dumps({
             'author': book['author'],
-            'title' : u'"{0}"'.format(book['title']),
+            'title' : '"{0}"'.format(book['title']),
             'info'  : book_info if book_info else "Brak",
             'pages' : book['pages'],
             'link'  : book['url'],
-        }
+        })
 
     def query_book_info(self, book, search_field):
-        if not(book.has_key(search_field) and book[search_field]):
+        if not(search_field in book and book[search_field]):
             return
 
         # Query book and fetch results.
@@ -212,7 +217,7 @@ class n4949(LibraryBase):
         results_list_xpath = '//ul[@class="kl"]'
 
         # Select standard form.
-        self.select_form(u'Indeks')
+        self.select_form('Indeks')
 
         # Input search value.
         set_input_value(self.browser, 'form1:textField1', book['isbn'])
@@ -247,11 +252,11 @@ class n4949(LibraryBase):
         submit_button_id = 'form1:btnSzukajOpisow'
 
         # Select advanced form.
-        self.select_form(u'Złożone')
+        self.select_form('Złożone')
 
         # Input book author.
         author_name_list = book['author'].split(' ')
-        author_string    = u'{0}, {1}'.format(
+        author_string    = '{0}, {1}'.format(
             author_name_list.pop(),
             ' '.join(author_name_list)
         )
@@ -330,21 +335,19 @@ class n4949(LibraryBase):
         if not (book and results):
             return
 
-        re_unavailable = re.compile('Brak\szasobu')
-
         info_by_library = []
         for book_url in results:
             response = get_parsed_url_response(book_url, opener=self.opener)
             resource = response.find('div', { 'id': 'zasob' })
             if (not resource or
                 not resource.contents or
-                re_unavailable.match(resource.text)
+                resource.text.strip() == 'Brak zasobu'
             ):
                 response.decompose()
                 continue
 
             ul = resource.find('ul', { 'class': 'zas_filie' })
-            for li in ul.findAll('li'):
+            for li in ul.find_all('li'):
                 department_info = li.find('div', { 'class': 'filia' })
 
                 # Get library address.
@@ -365,7 +368,7 @@ class n4949(LibraryBase):
 
                 warning = li.find('div', { 'class': 'opis_uwaga' })
 
-                not_available_str = u'Pozycja nie do wypożyczenia'
+                not_available_str = 'Pozycja nie do wypożyczenia'
                 not_available     = li.find('img', { 'title': not_available_str })
 
                 # Extract availability string
@@ -378,11 +381,11 @@ class n4949(LibraryBase):
                     availability = availability_info[0].strip()
 
                 # Extract section name.
-                section_info  = (warning.previous.strip() if warning.previous else '')
+                section_info  = (warning.previous_element.strip() if warning.previous_element else '')
                 section_match = self.section_re.search(section_info)
                 section       = (section_match.group() if section_match else '')
 
-                info_by_library.append(u'{0} - {1} - {2} - {3}'.format(
+                info_by_library.append('{0} - {1} - {2} - {3}'.format(
                     department, address, section, availability
                 ))
 
@@ -396,8 +399,8 @@ class n4949(LibraryBase):
 class n5004(LibraryBase):
     data = LIBRARIES_DATA['5004']
 
-    info_re    = re.compile(u'^(.+)\.\s-\s.*$')
-    tr_re      = re.compile(u'^(.+)\s;\s(?:przeł|\[tł).*$')
+    info_re    = re.compile('^(.+)\.\s-\s.*$')
+    tr_re      = re.compile('^(.+)\s;\s(?:przeł|\[tł).*$')
     onclick_re = re.compile(u"^javascript:LoadWebPg\('([^']+)',\s'([^']+)'\);.*$")
 
     def pre_process(self):
@@ -509,14 +512,14 @@ class n5004(LibraryBase):
 
             # Extract book info from rows.
             info_table = response.find('table', {'class': 'tabOutWyniki_w'})
-            info_rows  = (info_table.findAll('td', {'class': 'tdOutWyniki_w'})
+            info_rows  = (info_table.find_all('td', {'class': 'tdOutWyniki_w'})
                           if info_table else None)
             if not info_rows:
                 response.decompose()
                 continue
 
             # Pack results.
-            found_rows_num = len(info_rows) / headers_len
+            found_rows_num = floor(len(info_rows) / headers_len)
             for row_num in range(found_rows_num):
                 range_start = row_num * headers_len
                 range_end   = range_start + headers_len

@@ -1,16 +1,16 @@
-#!/usr/bin/pyth n -tt
 # -*- coding: utf-8 -*-
 
 # Import {{{
 import os
 import sys
-import simplejson as json
-import cookielib
-import httplib
-import urllib2
-import urlparse
+import json
 import codecs
-from BeautifulSoup import BeautifulSoup
+from http.cookiejar import CookieJar
+from http.client import BadStatusLine
+from urllib.request import (build_opener, HTTPCookieProcessor, Request)
+from urllib.error import (HTTPError, URLError)
+from urllib.parse import urlparse, urlencode
+from bs4 import BeautifulSoup
 from multiprocessing.dummy import Lock
 # }}}
 
@@ -40,8 +40,9 @@ def get_json_file(file_name):
     try:
         with codecs.open(file_path, 'r', 'utf-8') as file_handle:
             file_data = json.load(file_handle)
-    except IOError as (e,s):
-        print "I/O error({0}): {1}".format(e,s)
+    except IOError as e:
+        errno, strerror = e.args
+        print("I/O error({0}): {1}".format(errno, strerror))
 
     return file_data
 
@@ -57,12 +58,12 @@ def dump_json_file(struct, file_path):
 
 def prepare_opener(url, headers=None, data=None, cookie_jar=None):
     # Prepare jar for cookies.
-    if cookie_jar is None: cookie_jar = cookielib.CookieJar()
+    if cookie_jar is None: cookie_jar = CookieJar()
 
     # Prepare request handler.
-    opener     = urllib2.build_opener(
-        urllib2.HTTPCookieProcessor(cookie_jar),
-        # urllib2.HTTPHandler(debuglevel=1),
+    opener     = build_opener(
+        HTTPCookieProcessor(cookie_jar),
+        # urllib.request.HTTPHandler(debuglevel=1),
     )
 
     # Prepare request headers.
@@ -80,21 +81,15 @@ def prepare_opener(url, headers=None, data=None, cookie_jar=None):
     return opener
 
 def open_url(url, opener, data=None, verbose=True):
-    request = urllib2.Request(url, data=data)
+    request = Request(url, data=data)
 
     response = None
     try:
         response = opener.open(request)
-        if response.getcode() != 200:
-            response = None
-    except (
-        ValueError,
-        httplib.BadStatusLine,
-        urllib2.HTTPError,
-        urllib2.URLError
-    ) as e:
+        response = (response if response.getcode() == 200 else None)
+    except (ValueError, BadStatusLine, HTTPError, URLError) as e:
         if verbose:
-            print "Could not fetch url '%s'. Error: %s." % (url, e)
+            print("Could not fetch url '%s'. Error: %s." % (url, e))
 
     return response
 
@@ -110,10 +105,7 @@ def parse_url_response(response, verbose=True):
     parser = None
     if response:
         try:
-            parser = BeautifulSoup(
-                response,
-                convertEntities=BeautifulSoup.HTML_ENTITIES
-            )
+            parser = BeautifulSoup(response, "lxml")
         except TypeError:
             if verbose:
                 print(u'Error parsing response.')
@@ -130,11 +122,15 @@ def get_parsed_url_response(url, data=None, opener=None, verbose=True):
     )
 
 def get_url_query_string(url):
-    return urlparse.urlparse(url).query
+    return urlparse(url).query
 
 def get_url_net_location(url):
-    parser = urlparse.urlparse(url)
+    parser = urlparse(url)
     return '{0}://{1}/'.format(parser.scheme, parser.netloc)
+
+def build_url(base_url, query):
+    if not base_url: return ''
+    return '{0}?{1}'.format( base_url, urlencode(query or {}) )
 
 def print_progress(lock=Lock()):
     with lock:

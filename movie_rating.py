@@ -6,7 +6,7 @@ import os
 import re
 import urllib
 import urllib2
-import simplejson as json
+import json
 from optparse import OptionParser
 from multiprocessing.dummy import Pool, cpu_count, Lock
 from filecache import filecache
@@ -127,13 +127,13 @@ def imdb_info(movie_struct, opener=prepare_imdb_opener()):
         return empty_value
 
     res_list = response.find('table', {'class': 'findList'})
-    res_rows = res_list.findAll('td', {'class': 'result_text' })
+    res_rows = res_list.find_all('td', {'class': 'result_text' })
     year_re  = re.compile('\d{4}')
 
     movies_list = []
     for res_row in res_rows:
         decoded_title = res_row.i.string if res_row.i else res_row.a.string
-        decoded_year  = res_row.a.nextSibling.string.strip()
+        decoded_year  = res_row.a.next_sibling.string.strip()
         year_match    = year_re.search(decoded_year)
         decoded_year  = int(year_match.group()) if year_match else None
         decoded_href  = res_row.first('a')['href'] if res_row.first('a') else None
@@ -179,7 +179,7 @@ def imdb_info(movie_struct, opener=prepare_imdb_opener()):
             movie_duration \
                 = movie_duration_el.string.replace('min', '').strip()
 
-        movie_genres_el = movie_infobar.findAll('span', { 'itemprop': 'genre' })
+        movie_genres_el = movie_infobar.find_all('span', { 'itemprop': 'genre' })
         movie_genre     = ', '.join([genre.string for genre in movie_genres_el])
 
     # Extract description and metacritic value.
@@ -301,7 +301,7 @@ def extract_folders(extract_path):
 def get_worksheet_name():
     return u'Filmoceny'
 
-def write_movies_to_gdata(auth_data, headers, info):
+def write_movies_to_google_docs(auth_data, headers, info):
     info.insert(0, headers)
 
     # Drive connecton boilerplate.
@@ -355,7 +355,7 @@ def fetch_movie_ratings(directory, auth_data):
         ]
 
         if auth_data:
-            write_movies_to_gdata(auth_data, headers, info)
+            write_movies_to_google_docs(auth_data, headers, info)
         else:
             write_movies_to_xls(headers, info)
 
