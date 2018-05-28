@@ -9,6 +9,7 @@ import codecs
 import subprocess
 from datetime import datetime
 from optparse import OptionParser
+from operator import itemgetter
 
 import lib.libraries
 from lib.common import get_file_path, get_json_file
@@ -20,21 +21,25 @@ from lib.xls import make_xls
 # }}}
 
 # Lovely constants.
-WORKSHEET_HEADERS = ('author', 'title', 'info', 'pages', 'link')
+WORKSHEET_HEADERS = ('author', 'title', 'department', 'section', 'pages', 'link')
 
 def get_books_status(books_list, library):
     if not books_list: return
 
     # Get library instance.
     library = getattr(lib.libraries, 'n{0}'.format(library))(books=books_list)
+
     # Fetch all books status.
-    return library.get_books_status()
+    books_status = library.get_books_status()
+
+    # Sort books by deparment and section.
+    books_status.sort(key=itemgetter('department', 'section'))
+
+    return books_status
 
 def get_worksheet_name(shelf_name):
-    return '{0} {1}'.format(
-        shelf_name.capitalize().replace('-', ' '),
-        get_today_date(),
-    )
+    return '{0} {1}'.format(shelf_name.capitalize().replace('-', ' '),
+                            get_today_date())
 
 def get_today_date(): return datetime.today().strftime("%Y-%m-%d")
 
@@ -53,37 +58,28 @@ def write_books_to_google_docs(auth_data, shelf_name, worksheet_title, books_sta
     client = get_service_client(auth_data)
 
     # Fetch spreadsheet params.
-    books_status = [
-        [book[header] for header in WORKSHEET_HEADERS]
-        for book in books_status
-    ]
+    books_status = [[book[header] for header in WORKSHEET_HEADERS]
+                    for book in books_status]
 
     print("Writing books.")
-    write_rows_to_worksheet(
-        client,
-        worksheet_title,
-        get_worksheet_name(shelf_name),
-        books_status,
-    )
+    write_rows_to_worksheet(client,
+                            worksheet_title,
+                            get_worksheet_name(shelf_name),
+                            books_status)
 
 def write_books_to_xls(shelf_name, books_status):
-    return make_xls(
-        shelf_name,
-        get_today_date(),
-        WORKSHEET_HEADERS,
-        books_status
-    )
+    return make_xls(shelf_name,
+                    get_today_date(),
+                    WORKSHEET_HEADERS,
+                    books_status)
 
 def get_books_source_file(source):
-    return source if re.match(r'^.*\.json$', source) else 'imogeen_%s.json' % (
-        source
-    )
+    return source if re.match(r'^.*\.json$', source) else 'imogeen_%s.json' % (source)
 
 def refresh_books_list(source, profile_id):
-    script_file = get_file_path('imogeen.py')
     return subprocess.call([
         sys.executable,
-        '-tt', script_file,
+        '-tt', get_file_path('imogeen.py'),
         '-s',  source,
         '-i',  profile_id,
     ])
@@ -136,7 +132,7 @@ def main():
 
     # Check results list.
     if not books_status:
-        print('No library status found.')
+        print('No books from list available.')
         exit(-1)
 
     # Write books status.
@@ -146,9 +142,7 @@ def main():
                                    config['worksheet_title'],
                                    books_status)
     else:
-        write_books_to_xls(
-            books_source, books_status
-        )
+        write_books_to_xls(books_source, books_status)
 
 if __name__ == "__main__":
     main()

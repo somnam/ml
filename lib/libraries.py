@@ -38,10 +38,16 @@ class LibraryBase(object):
         self.books   = [] if books is None else books
 
     @property
-    def books_by_isbn(self):
-        return {book['isbn']: book for book in self.books}
+    def books_by_uid(self):
+        return {self.get_book_uid(book): book for book in self.books}
+
+    def get_book_uid(self, book):
+        return '{0}:{1}'.format(self.data['id'], book['isbn'])
 
     def pre_process(self):
+        pass
+
+    def post_process(self):
         pass
 
     def init_browser(self):
@@ -90,8 +96,10 @@ class LibraryBase(object):
         # Will contain books info.
         books_status = []
         for book in self.books:
-            book_info_json = cached_book_info_wrapper(book['isbn'])
-            books_status.append(json.loads(book_info_json))
+            book_json = cached_book_info_wrapper(self.get_book_uid(book))
+            # Don't append empty info.
+            if not book_json: continue
+            books_status.extend(json.loads(book_json))
 
         self.stop_browser()
 
@@ -99,12 +107,13 @@ class LibraryBase(object):
 
     def cached_book_info_wrapper(self):
         @filecache(DAY)
-        def get_cached_book_info(isbn):
-            return self.get_book_info(self.books_by_isbn[isbn])
+        def get_cached_book_info(book_uid):
+            return self.get_book_info(self.books_by_uid[book_uid])
         return get_cached_book_info
 
     def get_book_info(self, book):
         book_info = None
+
         # Retry fetching book info (title vs isbn).
         retry_fetch = 2
         while not book_info and retry_fetch:
@@ -133,21 +142,33 @@ class LibraryBase(object):
                 # Is called when except does 'continue'
                 retry_fetch -= 1
 
+            # None - book wasn't found, search by other criteria
+            # []   - book was found but is unavailable, end search
+            is_unavailable = book_info is not None and not book_info
+
+            # Book has been successfully queried or is not for rent.
             if book_info:
                 print('Successfully queried book info.')
+                # Return info in json format.
+                book_info = json.dumps([{
+                    'author':     book['author'],
+                    'title':      '"{0}"'.format(book['title']),
+                    'department': entry[0],
+                    'section':    entry[1],
+                    'pages':      book['pages'],
+                    'link':       book['url'],
+                } for entry in book_info])
                 break
-            elif retry_fetch:
-                print('Retry book fetching.')
-            else:
-                print('Book fetching failed.')
+            # If book is unavailable then don't search for it a second time.
+            elif is_unavailable:
+                print('Book not available.')
+                book_info = None
+                break
 
-        return json.dumps({
-            'author': book['author'],
-            'title' : '"{0}"'.format(book['title']),
-            'info'  : book_info if book_info else "Brak",
-            'pages' : book['pages'],
-            'link'  : book['url'],
-        })
+            # Print next loop info.
+            print('Retry book fetching.' if retry_fetch else 'Book not found.')
+
+        return book_info
 
     def query_book_info(self, book, search_field):
         if not(search_field in book and book[search_field]):
@@ -164,15 +185,11 @@ class n4949(LibraryBase):
     data = LIBRARIES_DATA['4949']
 
     isbn_re    = re.compile('\D+')
-    section_re = re.compile('\([^\)]+\)')
+    section_re = re.compile('\s\(\s.+\s\)\s')
 
     search_type_id     = 'form1:dropdown1'
     resource_type_id   = 'form1:dropdown4'
     clear_button_id    = 'form1:btnCzyscForme'
-
-    def post_process(self):
-        # Sleep for short time to avoid frequent requests.
-        time.sleep(0.2)
 
     # Search type:
     # 1 - Author
@@ -332,10 +349,9 @@ class n4949(LibraryBase):
         return results
 
     def extract_book_info(self, book, results):
-        if not (book and results):
-            return
+        if not (book and results): return
 
-        info_by_library = []
+        book_info = []
         for book_url in results:
             response = get_parsed_url_response(book_url, opener=self.opener)
             resource = response.find('div', { 'id': 'zasob' })
@@ -355,46 +371,36 @@ class n4949(LibraryBase):
                 if (department_info and department_info.contents):
                     department = department_info.contents[0]
                     location   = (department_info.contents[-1].split(',')
-                                  if department_info.contents[-1] else '')
-                    address    = (location[0] if location else '')
+                                  if department_info.contents[-1] else None)
+                    address    = (location[0] if location else None)
 
                 # Check if address is in accepted list.
-                if not address in self.data['accepted_address']: continue
+                if not address in self.data['accepted_locations']: continue
+
+                # Check if book is rented/not available.
+                warning       = li.find('div', { 'class': 'opis_uwaga' })
+                not_available = li.find('img', { 'title': 'Pozycja nie do wypożyczenia' })
+                if (not_available or (warning and warning.text)):
+                    continue
 
                 # Get availability info.
-                availability_info = li.find('div', { 'class': 'dostepnosc' })
-                availability_info = (availability_info.text.split("\n")
-                                     if availability_info else [])
+                availability = [int(d) for d in
+                                li.find('div', { 'class': 'dostepnosc' }).text.split()
+                                if d.isdigit()]
 
-                warning = li.find('div', { 'class': 'opis_uwaga' })
-
-                not_available_str = 'Pozycja nie do wypożyczenia'
-                not_available     = li.find('img', { 'title': not_available_str })
-
-                # Extract availability string
-                availability = ''
-                if not_available:
-                    availability = not_available_str
-                elif warning and warning.text:
-                    availability = warning.text
-                elif availability_info and availability_info[0]:
-                    availability = availability_info[0].strip()
+                # Book is not available.
+                if not(availability and availability[0]): continue
 
                 # Extract section name.
-                section_info  = (warning.previous_element.strip() if warning.previous_element else '')
-                section_match = self.section_re.search(section_info)
-                section       = (section_match.group() if section_match else '')
+                section_info  = li.find('table', {'class': 'zasob'}).td.find_next('td')
+                section_match = self.section_re.search(section_info.text)
+                section       = section_match.group().strip() if section_match else ''
 
-                info_by_library.append('{0} - {1} - {2} - {3}'.format(
-                    department, address, section, availability
-                ))
+                book_info.append((department, section))
 
             response.decompose()
 
-            # Sleep for short time to avoid frequent requests.
-            time.sleep(0.1)
-
-        return "\n".join(info_by_library) if info_by_library else None
+        return book_info
 
 class n5004(LibraryBase):
     data = LIBRARIES_DATA['5004']
@@ -496,37 +502,44 @@ class n5004(LibraryBase):
     def extract_book_info(self, book, results):
         if not (book and results): return
 
-        headers_len, book_info = 5, []
+        book_info = []
         for match in results:
             onclick_match = self.onclick_re.search(match.get_attribute('onclick'))
             if not onclick_match: continue
 
             url_suffix, query_params = onclick_match.groups()
 
-            book_url = '{0}{1}?{2}{3}'.format(
-                self.data['base_url'], url_suffix, self.query_string, query_params
-            )
+            book_url = '{0}{1}?{2}{3}'.format(self.data['base_url'],
+                                              url_suffix,
+                                              self.query_string,
+                                              query_params)
 
             response = get_parsed_url_response(book_url, opener=self.opener)
             if not response: continue
 
             # Extract book info from rows.
             info_table = response.find('table', {'class': 'tabOutWyniki_w'})
-            info_rows  = (info_table.find_all('td', {'class': 'tdOutWyniki_w'})
-                          if info_table else None)
+
+            # Fetch all book entries without the table header.
+            info_rows = info_table.find_all('tr')[1:] if info_table else None
             if not info_rows:
                 response.decompose()
                 continue
 
-            # Pack results.
-            found_rows_num = floor(len(info_rows) / headers_len)
-            for row_num in range(found_rows_num):
-                range_start = row_num * headers_len
-                range_end   = range_start + headers_len
-                book_info.append(' '.join(
-                    row.text for row in info_rows[range_start:range_end]
-                ))
+            for row in info_rows:
+                # Extract book location and section from row.
+                row_info = row.td.find_next('td').text.split()
+                location, section = None, None
+                if len(row_info) == 1:
+                    location = row_info[0]
+                elif len(row_info) == 2:
+                    location, section = row_info[0:2]
+
+                # Check if address is in accepted list.
+                if not location in self.data['accepted_locations']: continue
+
+                book_info.append((self.data['department'], (section or '')))
 
             response.decompose()
 
-        return "\n".join(book_info) if book_info else None
+        return book_info
