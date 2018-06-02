@@ -15,13 +15,20 @@ def get_service_client(auth):
     ])
     return gspread.authorize(credentials)
 
-def get_writable_worksheet(client, workbook_title, worksheet_title, rows_n, cols_n):
+def get_workbook(client, workbook_title):
     if not client: return
 
     try:
         workbook = client.open(workbook_title)
     except SpreadsheetNotFound:
         workbook = client.create(title=workbook_title)
+
+    return workbook
+
+def get_writable_worksheet(client, workbook_title, worksheet_title, rows_n, cols_n):
+    if not client: return
+
+    workbook = get_workbook(client, workbook_title)
 
     try:
         worksheet = workbook.worksheet(title=worksheet_title)

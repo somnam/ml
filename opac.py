@@ -52,7 +52,7 @@ def get_books_list(file_name):
 
     return books_list
 
-def write_books_to_google_docs(auth_data, shelf_name, worksheet_title, books_status):
+def write_books_to_google_docs(auth_data, shelf_name, workbook_title, books_status):
     # Fetch google_docs client.
     print("Authenticating to Google service.")
     client = get_service_client(auth_data)
@@ -63,7 +63,7 @@ def write_books_to_google_docs(auth_data, shelf_name, worksheet_title, books_sta
 
     print("Writing books.")
     write_rows_to_worksheet(client,
-                            worksheet_title,
+                            workbook_title,
                             get_worksheet_name(shelf_name),
                             books_status)
 
@@ -139,7 +139,7 @@ def main():
     if options.auth_data:
         write_books_to_google_docs(options.auth_data,
                                    books_source,
-                                   config['worksheet_title'],
+                                   config['workbook_title'],
                                    books_status)
     else:
         write_books_to_xls(books_source, books_status)

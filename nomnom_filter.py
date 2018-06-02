@@ -2,154 +2,71 @@
 # -*- coding: utf-8 -*-
 
 # Import 
-import sys
 import re
 import zlib
-import json
-import codecs
-import urllib2
 import threading
 from optparse import OptionParser
-from urlparse import urlparse
+from urllib.parse import urlparse
 from filecache import filecache, YEAR
 from lib.common import (
     get_parsed_url_response,
-    get_file_path,
+    get_json_file,
     print_progress,
     print_progress_end,
 )
 from lib.gdocs import (
     get_service_client,
-    get_writable_cells,
-    retrieve_spreadsheet_id,
+    get_workbook,
     write_rows_to_worksheet,
 )
 
-SPREADSHEET_TITLE = u'Lista'
-STDIN_ENC         = sys.stdin.encoding
+# Lock for appending row to list.
+LOCK = threading.Lock()
 
-def retrieve_recipe_cells(client, selected_only):
-    if not client:
-        return
+def get_page_text(recipe_url):
+    # Get parsed page instance.
+    page = get_parsed_url_response(recipe_url, verbose=False)
+    if not page: return
 
-    # Get worksheet feed.
-    spreadsheet_id = retrieve_spreadsheet_id(client, SPREADSHEET_TITLE)
-    work_feed      = client.GetWorksheets(spreadsheet_id)
+    # Remove <script> tags from page.
+    # Remove <style> tags from page.
+    # Remove <a> tags from page.
+    # Remove <form> tags from page.
+    for elem in page.body.find_all(['script', 'style', 'form', 'a']):
+        elem.extract()
 
-    # Filter worksheets if selected only option was given.
-    worksheets = work_feed.entry
-    if selected_only:
-        worksheets = filter(
-            lambda sheet: sheet.title.text in selected_only,
-            worksheets
-        )
+    # Remove all hidden items.
+    for elem in page.body.find_all(attrs={ 'display': 'none' }):
+        elem.extract()
 
-    # Fetch worksheet cells.
-    recipe_cells = []
-    for worksheet in worksheets:
-        print_progress()
-        cells = get_writable_cells(
-            client, spreadsheet_id, worksheet, max_col=2
-        )
-        recipe_cells.append(cells)
-    print_progress_end()
+    # Remove comments.
+    for attr_name in ('comment', 'koment'):
+        attr_re = re.compile('.*{0}.*'.format(attr_name), re.I)
+        for elem in page.body.find_all(attrs={ 'id': attr_re }):
+            elem.extract()
+        for elem in page.body.find_all(attrs={ 'class': attr_re }):
+            elem.extract()
 
-    return recipe_cells
+    page_text = page.body.get_text().replace("\n", '')
 
-def filter_nomnoms(row, lock, filtered_recipes, contains_re, filter_re):
-    # Skip empty rows.
-    recipe_cell  = row[1].cell.input_value
-    if not recipe_cell:
-        return
+    page.decompose()
 
-    # Check if current recipe matches given filters.
-    filtered_recipe  = False
-    recipe_url       = urlparse(recipe_cell)
-    recipe_url_value = recipe_url.geturl()
-    # Check for correct url.
-    if recipe_url.scheme and recipe_url.netloc:
-        # Print info.
-        with lock:
-            print_progress()
+    return page_text
 
-        filtered_recipe = filter_nomnom_page(
-            recipe_url_value,
-            contains_re,
-            filter_re
-        )
-    # No url given - treat cell content as recipe.
-    else:
-        if filter_recipe(recipe_cell, contains_re, filter_re):
-            filtered_recipe = True
-
-    # Append filtered row.
-    with lock:
-        if filtered_recipe and not filtered_recipes.has_key(recipe_url_value):
-            filtered_recipes[recipe_url_value] = row
-
-    return
-
-def filter_nomnom_page(recipe_url_value, contains_re, filter_re):
-    """ Check if current recipe url matches given filters."""
-
-    filtered_recipe = False
-
-    # Fetch parsed recipe page.
-    recipe_page = get_nomnom_page(recipe_url_value)
-    if recipe_page:
-        # Check page content with given filters.
-        decompressed_page = zlib.decompress(recipe_page).decode(STDIN_ENC)
-        if filter_recipe(decompressed_page, contains_re, filter_re):
-            filtered_recipe = True
-
-    return filtered_recipe
-
-# Invalidate values after a year
 @filecache(YEAR)
-def get_nomnom_page(recipe_url):
-    # Get BeautifulSoup page instance.
-    parser = get_parsed_url_response(recipe_url, verbose=False)
+def get_compressed_page_text(recipe_url):
+    page_text = get_page_text(recipe_url)
+    return zlib.compress(page_text.encode('utf-8')) if page_text else None
 
-    page = None
-    if parser and parser.find('body'):
-        # Don't search in header.
-        body = parser.find('body')
-
-        # Remove <script> tags from page.
-        [script.extract() for script in body.find_all('script')]
-
-        # Remove <a> tags from page.
-        [a.extract() for a in body.find_all('a')]
-
-        # Remove <form> tags from page.
-        [form.extract() for form in body.find_all('form')]
-
-        # Remove all hidden items.
-        [elem.extract() for elem in body.find_all(None, { 'display': 'none' })]
-
-        # Remove comments.
-        comments = ('comment', 'koment')
-        for comment in comments:
-            comment_re = re.compile('.*' + comment + '.*', re.I)
-            [elem.extract() for elem in body.find_all(
-                None,
-                { 'id': comment_re }
-            )]
-            [elem.extract() for elem in body.find_all(
-                None,
-                { 'class': comment_re }
-            )]
-
-        # Convert back to string and zip.
-        page = zlib.compress(unicode(body).encode(STDIN_ENC))
-
-    if parser: parser.decompose()
-
-    return page
+def get_recipe_text(recipe_url):
+    compressed_text = get_compressed_page_text(recipe_url)
+    return (zlib.decompress(compressed_text).decode('utf-8') if compressed_text
+                                                                else None)
 
 def filter_recipe(recipe_page, contains_re, filter_re):
-    result = False
+    if not recipe_page: return False
 
+    result = False
     if contains_re and not filter_re:
         result = re.search(contains_re, recipe_page, re.UNICODE)
 
@@ -164,98 +81,102 @@ def filter_recipe(recipe_page, contains_re, filter_re):
 
     return result
 
-def get_step_end_index(rows_len, step, i):
-    return (i+step) if (i+step) < rows_len else rows_len
+def filter_recipe_row(row, results, contains_re, filter_re):
+    # Skip empty rows.
+    if not row[1]: return
+
+    parsed_url = urlparse(row[1])
+    recipe_url = parsed_url.geturl()
+
+    is_filtered = False
+    # First quick check - try if recipe description matches given filters.
+    if filter_recipe(row[0], contains_re, filter_re):
+        is_filtered = True
+    # Second quick check - treat cell content as recipe.
+    elif filter_recipe(row[1], contains_re, filter_re):
+        is_filtered = True
+    # No luck - check if recipe page matches given filters.
+    elif parsed_url.scheme and parsed_url.netloc:
+        is_filtered = filter_recipe(get_recipe_text(recipe_url),
+                                    contains_re,
+                                    filter_re)
+
+    # Print progress info.
+    print_progress()
+
+    # Append filtered row.
+    with LOCK:
+        if is_filtered and recipe_url not in results:
+            results[recipe_url] = row
+
+    return
+
+def filter_recipes(rows, contains_re, filter_re):
+    if not rows: return
+
+    # Will contain filtered results.
+    results = {}
+
+    # Process rows in groups of 10.
+    step = 10
+    for chunk in [ rows[i:i+step] for i in range(0, len(rows), step) ]:
+        threads = [threading.Thread(target=filter_recipe_row,
+                                    args=(row, results, contains_re, filter_re))
+                   for row in chunk]
+        # Wait for threads to finish.
+        for thread in threads:
+            thread.start()
+        for thread in threads:
+            thread.join()
+    print_progress_end()
+
+    return list(results.values())
+
+def get_result_worksheet_name(options):
+    """ Get name of writable worksheet. """
+
+    result_name = options.result or ''
+    if not result_name:
+        # Create name from 'contains' and 'filter' params.
+        if options.contains:
+            result_name += '+' + options.contains
+        if options.filter:
+            result_name += '-' + options.filter
+
+    return result_name
 
 def build_and_regex(option):
     return ''.join('(?=.*%s)' % opt for opt in re.split(',', option))
 
-def filter_recipe_cells(recipe_cells, options):
-    if not recipe_cells:
-        return
-
+def build_regex_from_options(options):
     # Build regexp for required phrases.
-    contains_re = None
-    if options.contains:
-        contains_re = build_and_regex(options.contains)
+    contains_re = build_and_regex(options.contains) if options.contains else None
 
     # Build regexp for phrases to be filtered out.
-    filter_re = None
-    if options.filter:
-        filter_re = build_and_regex(options.filter)
+    filter_re = build_and_regex(options.filter) if options.filter else None
 
-    # Will contain filtered results.
-    filtered_recipes = {}
+    return (contains_re, filter_re)
 
-    # Lock for appending row to list.
-    lock = threading.Lock()
+def get_worksheets_from_options(options):
+    return (options.worksheets.split(',') if options.worksheets else None)
 
-    # Process rows in groups of 10.
-    step = 10
-    for cells in recipe_cells:
-        # Build rows - each row contains name and href cells in a tuple.
-        rows        = zip(*([iter(cells.entry)] * 2))
-        rows_len    = len(rows)
+def retrieve_recipe_rows(client, workbook_title, worksheet_names):
+    if not client: return
 
-        # Create treads per group.
-        for i in range(rows_len)[::step]:
-            j = get_step_end_index(rows_len, step, i)
+    # Get worksheet feed.
+    workbook = get_workbook(client, workbook_title)
 
-            # Start a new thread for each row.
-            recipe_threads = [
-                threading.Thread(
-                    target=filter_nomnoms,
-                    args=(row, lock, filtered_recipes, contains_re, filter_re)
-                )
-                for row in rows[i:j]
-            ]
+    # Filter worksheets if 'worksheets' option was given.
+    worksheets = workbook.worksheets()
+    if worksheet_names:
+        worksheets = [ ws for ws in worksheets if ws.title in worksheet_names ]
 
-            # Wait for threads to finish.
-            for thread in recipe_threads:
-                thread.start()
-            for thread in recipe_threads:
-                thread.join()
-    print_progress_end()
+    # Fetch worksheet rows.
+    recipe_rows = []
+    for worksheet in worksheets:
+        recipe_rows.extend(worksheet.get_all_values())
 
-    # Map cell objects to values.
-    filtered_recipe_values = []
-    for row in filtered_recipes.values():
-        filtered_recipe_values.append([
-            cell.cell.input_value for cell in row
-        ])
-
-    return filtered_recipe_values
-
-def get_worksheet_name(options):
-    """ Get name of writable worksheet. """
-
-    worksheet_name = options.worksheet or u''
-    if not worksheet_name:
-        # Create name from 'contains' and 'filter' params.
-        if options.contains:
-            worksheet_name += u'+' + options.contains
-        if options.filter:
-            worksheet_name += u'-' + options.filter
-
-    return worksheet_name
-
-def decode_options(options):
-    """Hack to decode non-ascii option values."""
-
-
-    # 'options' is a Values instance, how to assign to it using a loop?
-    (options.contains,
-     options.filter,
-     options.worksheet,
-     options.selected_only
-    ) = (
-        options.contains.decode(STDIN_ENC) if options.contains else None,
-        options.filter.decode(STDIN_ENC) if options.filter else None,
-        options.worksheet.decode(STDIN_ENC) if options.worksheet else None,
-        options.selected_only.decode(STDIN_ENC) if options.selected_only else None
-    )
-
-    return
+    return recipe_rows
 
 def main():
     # Cmd options parser
@@ -264,44 +185,37 @@ def main():
     option_parser.add_option("-a", "--auth-data")
     option_parser.add_option("-c", "--contains")
     option_parser.add_option("-f", "--filter")
-    option_parser.add_option("-s", "--selected-only")
-    option_parser.add_option("-w", "--worksheet")
+    option_parser.add_option("-w", "--worksheets")
+    option_parser.add_option("-r", "--result")
 
     (options, args) = option_parser.parse_args()
 
-    if (
-        not options.auth_data or
-        not (options.contains or options.filter)
-    ):
-        # Display help.
+    # Display help.
+    if (not options.auth_data or not (options.contains or options.filter)):
         option_parser.print_help()
     else:
-        decode_options(options)
+        config = get_json_file('nomnom_filter.json')
 
         # Fetch google_docs client.
-        print(u'Authenticating to Google service.')
+        print('Authenticating to Google service.')
         client = get_service_client(options.auth_data)
 
         print("Retrieving recipes.")
-        selected_only = (options.selected_only.split(',')
-                         if options.selected_only
-                         else None)
-        recipe_cells  = retrieve_recipe_cells(
-            client, selected_only
-        )
+        recipe_rows = retrieve_recipe_rows(client,
+                                           config['workbook_title'],
+                                           get_worksheets_from_options(options))
 
         print("Filtering recipes.")
-        filtered_recipes = filter_recipe_cells(recipe_cells, options)
+        filtered_recipes = filter_recipes(recipe_rows,
+                                          *build_regex_from_options(options))
 
         # Write recipes only when any were found.
         if filtered_recipes:
             print("Writing %d filtered recipes." % len(filtered_recipes))
-            write_rows_to_worksheet(
-                client,
-                SPREADSHEET_TITLE,
-                get_worksheet_name(options),
-                filtered_recipes
-            )
+            write_rows_to_worksheet(client,
+                                    config['workbook_title'],
+                                    get_result_worksheet_name(options),
+                                    filtered_recipes)
         else:
             print("No recipes found :(.")
 
