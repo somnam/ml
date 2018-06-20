@@ -9,7 +9,7 @@ import urllib2
 import json
 from optparse import OptionParser
 from multiprocessing.dummy import Pool, cpu_count, Lock
-from filecache import filecache
+from lib.diskcache import diskcache, MONTH
 from fuzzywuzzy import fuzz
 from lib.common import (
     prepare_opener,
@@ -108,7 +108,7 @@ def prepare_imdb_opener():
     return prepare_site_opener(IMDB_SITE)
 
 # Invalidate values after 30 days.
-@filecache(30 * 24 * 60 * 60)
+@diskcache(MONTH)
 def imdb_info(movie_struct, opener=prepare_imdb_opener()):
     empty_value = ['']*5
 
@@ -213,7 +213,7 @@ def prepare_rotten_opener():
     return prepare_site_opener(ROTTEN_SITE)
 
 # Invalidate values after 30 days.
-@filecache(30 * 24 * 60 * 60)
+@diskcache(MONTH)
 def rottentomatoes_info(movie_struct, opener=prepare_rotten_opener()):
     info = ['']
 

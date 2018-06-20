@@ -7,7 +7,7 @@ from lib.common import (
     print_progress_end,
 )
 from lib.xls import open_workbook, save_workbook
-from filecache import filecache
+from lib.diskcache import diskcache, YEAR
 from optparse import OptionParser
 from multiprocessing.dummy import Pool, cpu_count
 
@@ -25,7 +25,7 @@ def get_parsed_ncbi_url_response(url, opener = prepare_ncbi_opener()):
     return get_parsed_url_response(url, opener = opener)
 
 # Invalidate values after 1 year.
-@filecache(365 * 24 * 60 * 60)
+@diskcache(YEAR)
 def fetch_proteins(accession):
     if accession is None: return
 

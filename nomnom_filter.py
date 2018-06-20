@@ -7,7 +7,7 @@ import zlib
 import threading
 from optparse import OptionParser
 from urllib.parse import urlparse
-from filecache import filecache, YEAR
+from lib.diskcache import diskcache, YEAR
 from lib.common import (
     get_parsed_url_response,
     get_json_file,
@@ -53,7 +53,7 @@ def get_page_text(recipe_url):
 
     return page_text
 
-@filecache(YEAR)
+@diskcache(YEAR)
 def get_compressed_page_text(recipe_url):
     page_text = get_page_text(recipe_url)
     return zlib.compress(page_text.encode('utf-8')) if page_text else None

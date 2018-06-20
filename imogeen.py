@@ -6,7 +6,7 @@ import json
 from operator import itemgetter
 from multiprocessing import cpu_count
 from multiprocessing.dummy import Pool
-from filecache import filecache, HOUR, MONTH
+from lib.diskcache import diskcache, HOUR, MONTH
 # TODO: Deprecated, use argparse instead.
 from optparse import OptionParser
 from lib.common import (
@@ -56,13 +56,7 @@ def get_profile_name(profile_id):
 
     profile_name = ''
     if profile_page:
-        profile_header = profile_page.find(
-            'div', 
-            { 'class': re.compile('profile-header') }
-        )
-        if profile_header:
-            profile_name = profile_header.find('h5', { 'class': 'title' }).text
-            profile_name = profile_name.replace(u'\xa0', u' ').strip()
+        profile_name = profile_page.find('li', { 'class': 'active' }).text
         profile_page.decompose()
 
     return profile_name
@@ -139,10 +133,10 @@ def progress_books_on_page(pager_url):
 
 
 # Invalidate values after 6 hours.
-@filecache(6 * HOUR)
+@diskcache(6*HOUR)
 def get_books_on_page(pager_url):
     """Get list of books on current page."""
-    
+
     books = None
     if pager_url:
         pager_page = get_parsed_lc_url_response(pager_url)
@@ -156,12 +150,12 @@ def get_books_on_page(pager_url):
     return books
 
 def progress_book_info(book_url):
-    book_info_json = get_book_info(book_url)
+    book_info = get_book_info(book_url)
     print_progress()
-    return json.loads(book_info_json)
+    return book_info
 
 # Invalidate values after 30 days.
-@filecache(MONTH)
+@diskcache(MONTH)
 def get_book_info(book_url):
     """Get all kinds of info on book."""
 
@@ -210,7 +204,7 @@ def get_book_info(book_url):
 
         book_page.decompose()
 
-    return json.dumps(book_info) if book_info else None
+    return book_info
 
 def progress_book_price(book_info):
     book_info['price'] = get_book_price(get_book_price_url(book_info))
@@ -218,6 +212,7 @@ def progress_book_price(book_info):
     return
 
 def get_book_price_url(book_info):
+    if not book_info: return
     return build_url(config['bb_url'], {
         'name':        book_info['title'],
         'info':        book_info['author'],
@@ -226,14 +221,15 @@ def get_book_price_url(book_info):
     })
 
 # Invalidate values after 30 days.
-def get_book_price(url):
+def get_book_price(price_url):
     """Get book price."""
 
-    response      = get_url_response(url)
-    response_json = (json.loads(response.read().decode('utf-8'))
-                     if response else None)
+    if price_url:
+        response      = get_url_response(price_url)
+        response_json = (json.loads(response.read().decode('utf-8'))
+                         if response else None)
 
-    book_price    = 0.0
+    book_price = 0.0
     if response_json and 'status' in response_json and response_json['status']:
         entries = (response_json['data'].values()
                    if type(response_json['data']) is dict
@@ -248,6 +244,7 @@ def get_book_price(url):
                           if 'price' in entry and entry['price']
                           else None)
             break
+
     return book_price
 
 def collect_shelf_books(pager_count, pager_url_base, include_price):
@@ -263,10 +260,8 @@ def collect_shelf_books(pager_count, pager_url_base, include_price):
             for index in range(1, (pager_count+1))
         ]
 
-        books_per_page = pool.map(
-            progress_books_on_page,
-            pager_urls
-        )
+        books_per_page = pool.map(progress_books_on_page, pager_urls)
+
         print_progress_end()
 
         book_urls = [

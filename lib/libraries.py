@@ -7,7 +7,7 @@ import time
 import socket
 from math import floor
 from fuzzywuzzy import fuzz
-from filecache import filecache, DAY
+from lib.diskcache import diskcache, DAY
 from lib.common import (
     open_url,
     get_json_file,
@@ -106,7 +106,7 @@ class LibraryBase(object):
         return books_status
 
     def cached_book_info_wrapper(self):
-        @filecache(DAY)
+        @diskcache(DAY)
         def get_cached_book_info(book_uid):
             return self.get_book_info(self.books_by_uid[book_uid])
         return get_cached_book_info
