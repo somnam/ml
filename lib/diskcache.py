@@ -26,8 +26,8 @@ def diskcache_decorator(function, invalidate_time=None, db_name='diskcache.db'):
         if invalidate_time:
             connector.invalidate_cache(function.__name__, invalidate_time)
         # Return cached value if present.
-        hit = connector.get_cache(function.__name__, *args, **kwargs)
-        if hit: return hit
+        result, hit = connector.get_cache(function.__name__, *args, **kwargs)
+        if hit: return result
 
         # Call wrapped method with orginal arguments.
         result = function(*args, **kwargs)
@@ -95,12 +95,13 @@ class SQLiteConnector:
                 self.cursor.execute(query, (fingerprint,))
                 row = self.cursor.fetchone()
         # Decode result value as json, revert to raw value if it fails.
+        hit = (True if row else False)
         try:
-            result = loads(row['result']) if row and row['result'] else None
-        except TypeError:
+            result = loads(row['result']) if hit and row['result'] else None
+        except (TypeError, UnicodeDecodeError):
             result = row['result']
 
-        return result
+        return result, hit
 
     def set_cache(self, result, function_name, *args, **kwargs):
         # Calculate fingerprint for current function and arguments.
