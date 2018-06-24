@@ -12,7 +12,7 @@ from optparse import OptionParser
 from operator import itemgetter
 
 import lib.libraries
-from lib.common import get_file_path, get_json_file
+from lib.common import get_file_path, get_config
 from lib.gdocs import (
     get_service_client,
     write_rows_to_worksheet,
@@ -86,7 +86,7 @@ def refresh_books_list(source, profile_id):
 
 def main():
     # Fetch library data.
-    config = get_json_file('opac.json')
+    config = get_config('opac')
 
     # Cmd options parser
     option_parser = OptionParser()

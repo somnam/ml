@@ -10,7 +10,7 @@ from urllib.parse import urlparse
 from lib.diskcache import diskcache, YEAR
 from lib.common import (
     get_parsed_url_response,
-    get_json_file,
+    get_config,
     print_progress,
     print_progress_end,
 )
@@ -194,7 +194,7 @@ def main():
     if (not options.auth_data or not (options.contains or options.filter)):
         option_parser.print_help()
     else:
-        config = get_json_file('nomnom_filter.json')
+        config = get_config('nomnom_filter')
 
         # Fetch google_docs client.
         print('Authenticating to Google service.')

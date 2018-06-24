@@ -10,8 +10,8 @@ from lib.diskcache import diskcache, HOUR, MONTH
 # TODO: Deprecated, use argparse instead.
 from optparse import OptionParser
 from lib.common import (
+    get_config,
     get_file_path,
-    get_json_file,
     dump_json_file,
     prepare_opener,
     open_url,
@@ -23,7 +23,7 @@ from lib.common import (
 )
 # }}}
 
-config = get_json_file('imogeen.json')
+config = get_config('imogeen')
 
 to_read_class_re       = re.compile('shelf-name')
 book_original_title_re = re.compile('tytu?')

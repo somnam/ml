@@ -12,6 +12,7 @@ from lib.common import (
     open_url,
     prepare_opener,
     get_parsed_url_response,
+    get_config,
     get_json_file,
     print_progress,
     print_progress_end
@@ -145,7 +146,7 @@ def main():
     client = get_service_client(options.auth_data)
 
     print("Writing authors.")
-    config = get_json_file('config.json')['authors']
+    config = get_config('authors')
     write_rows_to_worksheet(client,
                             config['workbook_title'],
                             config['worksheet_title'],

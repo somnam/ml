@@ -46,6 +46,12 @@ def get_json_file(file_name):
 
     return file_data
 
+def get_config(script_name):
+    if script_name is not None and len(script_name):
+        config        = get_json_file('config.json')
+        script_config = config[script_name] if script_name in config else None
+    return (script_config or {})
+
 def dump_json_file(struct, file_path):
     # utf-8 chars should be displayed properly in results file:
     # - codecs.open must be used instead of open, with 'utf-8' flag

@@ -15,7 +15,7 @@ from lib.common import (
     prepare_opener,
     get_parsed_url_response,
     get_file_path,
-    get_json_file,
+    get_config,
     print_progress,
     print_progress_end,
     make_dir_if_not_exists,
@@ -27,7 +27,7 @@ from lib.gdocs import (
 from lib.xls import make_xls
 # }}}
 
-FILTERS     = get_json_file('movie_rating.json')
+FILTERS     = get_config('movie_rating')
 IMDB_SITE   = 'https://www.imdb.com'
 ROTTEN_SITE = 'https://www.rottentomatoes.com/'
 
