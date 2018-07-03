@@ -10,7 +10,7 @@ from fuzzywuzzy import fuzz
 from lib.diskcache import diskcache, DAY
 from lib.common import (
     open_url,
-    get_json_file,
+    get_config,
     prepare_opener,
     get_parsed_url_response,
     get_url_query_string,
@@ -29,17 +29,13 @@ from selenium.webdriver.common.keys import Keys
 from selenium.webdriver.common.by import By
 # }}}
 
-LIBRARIES_DATA = get_json_file('opac.json')['libraries']
+LIBRARIES_DATA = get_config('opac')['libraries']
 
-class LibraryBase(object):
+class LibraryBase(object): # {{{
     def __init__(self, books=None):
         self.opener  = None
         self.browser = None
         self.books   = [] if books is None else books
-
-    @property
-    def books_by_uid(self):
-        return {self.get_book_uid(book): book for book in self.books}
 
     def get_book_uid(self, book):
         return '{0}:{1}'.format(self.data['id'], book['isbn'])
@@ -94,21 +90,26 @@ class LibraryBase(object):
         cached_book_info_wrapper = self.cached_book_info_wrapper()
 
         # Will contain books info.
-        books_status = []
+        books_status = {}
         for book in self.books:
-            book_json = cached_book_info_wrapper(self.get_book_uid(book))
+            # Skip if book was already fetched
+            book_uid = self.get_book_uid(book)
+            if book_uid in books_status: continue
+            # Fetch book info
+            book_json = cached_book_info_wrapper(book_uid)
             # Don't append empty info.
             if not book_json: continue
-            books_status.extend(json.loads(book_json))
+            books_status[book_uid] = json.loads(book_json)
 
         self.stop_browser()
 
-        return books_status
+        return [book for entry in books_status.values() for book in entry]
 
     def cached_book_info_wrapper(self):
+        books_by_uid = {self.get_book_uid(book): book for book in self.books}
         @diskcache(DAY)
         def get_cached_book_info(book_uid):
-            return self.get_book_info(self.books_by_uid[book_uid])
+            return self.get_book_info(books_by_uid[book_uid])
         return get_cached_book_info
 
     def get_book_info(self, book):
@@ -180,8 +181,9 @@ class LibraryBase(object):
         info    = self.extract_book_info(book, match)
 
         return info
+# }}}
 
-class n4949(LibraryBase):
+class n4949(LibraryBase): # {{{
     data = LIBRARIES_DATA['4949']
 
     isbn_re    = re.compile('\D+')
@@ -401,8 +403,9 @@ class n4949(LibraryBase):
             response.decompose()
 
         return book_info
+# }}}
 
-class n5004(LibraryBase):
+class n5004(LibraryBase): # {{{
     data = LIBRARIES_DATA['5004']
 
     info_re    = re.compile('^(.+)\.\s-\s.*$')
@@ -526,20 +529,28 @@ class n5004(LibraryBase):
                 response.decompose()
                 continue
 
+            found_section = None
             for row in info_rows:
-                # Extract book location and section from row.
-                row_info = row.td.find_next('td').text.split()
-                location, section = None, None
-                if len(row_info) == 1:
-                    location = row_info[0]
-                elif len(row_info) == 2:
-                    location, section = row_info[0:2]
+                # Extract book location, section and availability from row.
+                signature       = row.td.find_next('td')
+                signature_value = signature.text.split()
+                # Skip books without section name.
+                if len(signature_value) < 2: continue
 
                 # Check if address is in accepted list.
+                location, section = signature_value[0:2]
                 if not location in self.data['accepted_locations']: continue
 
-                book_info.append((self.data['department'], (section or '')))
+                # Check if book is available.
+                status_value = signature.find_next('td').text
+                if status_value != self.data['accepted_status']: continue
 
+                found_section = section
+                break
+
+            if found_section:
+                book_info.append((self.data['department'], found_section))
             response.decompose()
 
         return book_info
+# }}}
