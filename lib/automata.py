@@ -8,10 +8,7 @@ from selenium import webdriver
 from selenium.common.exceptions import TimeoutException, NoSuchElementException
 from selenium.webdriver.common.by import By
 from selenium.webdriver.support import expected_conditions
-from selenium.webdriver.support.ui import (
-    Select,
-    WebDriverWait,
-)
+from selenium.webdriver.support.ui import Select, WebDriverWait
 from selenium.webdriver.firefox.firefox_binary import FirefoxBinary
 # }}}
 
@@ -25,10 +22,9 @@ def browser_start():
     profile.set_preference('app.update.silent', False)
 
     # Load webdriver.
-    binary  = FirefoxBinary(get_file_path('./firefox/firefox'))
     browser = webdriver.Firefox(
         firefox_profile=profile,
-        firefox_binary=binary,
+        executable_path=get_file_path('env/bin/geckodriver'),
     )
     return browser
 

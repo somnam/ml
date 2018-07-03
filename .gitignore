@@ -7,4 +7,8 @@
 *.xls
 *.cache
 *.log
+*.db
+
+# Environment
+env/
 
