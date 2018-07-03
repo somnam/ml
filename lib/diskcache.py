@@ -1,3 +1,4 @@
+import os
 import sqlite3
 import inspect
 from json import dumps, loads
@@ -122,6 +123,9 @@ class SQLiteConnector:
 
     @staticmethod
     def get_table(file_name):
+        # Extract file name when full file path is given.
+        file_name = os.path.basename(file_name)
+        # Keep only alphanumeric characters for table name.
         return ''.join(char for char in file_name.replace('.py', '')
                             if char.isalnum())
 
