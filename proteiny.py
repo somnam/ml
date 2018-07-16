@@ -1,3 +1,4 @@
+import re
 import os
 from lib.common import (
     prepare_opener,
@@ -35,7 +36,7 @@ def fetch_proteins(accession):
     protein = None
     if protein_page:
         header  = protein_page.find('div', {'class': 'rprtheader'})
-        protein = header.h1.string if header.h1 else ''
+        protein = header.h1.text if (header and header.h1) else ''
         protein_page.decompose()
 
     return protein
@@ -46,14 +47,25 @@ def append_protein_names_to_workbook(workbook):
 
     # Process each worksheet.
     sheet_names = workbook.get_sheet_names()
+    # Used to search for accession column.
+    accession_re = re.compile(r'.*accession$')
     print(u'Processing {0} sheets'.format(len(sheet_names)))
     for name in sheet_names:
         sheet = workbook.get_sheet_by_name(name)
+        # Get column with accessions.
+        accession_col = 2
+        for col_i in range(2, sheet.max_column+1):
+            cell = sheet.cell(row=2, column=col_i)
+            if cell and cell.value and accession_re.match(cell.value):
+                accession_col = col_i
+                break
         # Get protein data.
         accessions = []
         for row_i in range(2, sheet.max_row+1):
-            cell = sheet.cell(row=row_i, column=2)
-            accessions.append(cell.value if cell else None)
+            cell = sheet.cell(row=row_i, column=accession_col)
+            # Skip empty rows.
+            if not(cell and cell.value): continue
+            accessions.append(cell.value)
 
         # Fetch proteins.
         proteins = pool.map(fetch_proteins, accessions)
@@ -79,7 +91,7 @@ def get_excel_file_names(args):
     # If file names aren't given in path, look for them inside current dir.
     if not args:
         file_names = filter(
-            lambda fn: fn.endswith('.xlsx'),
+            lambda fn: fn.endswith(('.xlsx', '.xls')),
             os.listdir(os.getcwd())
         )
     return file_names
@@ -106,6 +118,8 @@ def main():
     file_names = get_excel_file_names(args)
 
     process_workbooks(file_names)
+
+    raw_input(u"Done, please press [Enter]")
 
 if __name__ == "__main__":
     main()
