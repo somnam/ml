@@ -12,9 +12,11 @@ from lib.common import (
     open_url,
     get_config,
     prepare_opener,
+    encode_url_params,
     get_parsed_url_response,
     get_url_query_string,
     get_url_net_location,
+    get_unverifield_ssl_handler,
 )
 from lib.automata import (
     browser_start,
@@ -22,6 +24,7 @@ from lib.automata import (
     set_input_value,
     select_by_id_and_value,
     wait_is_visible,
+    wait_is_visible_by_css,
     wait_is_not_visible,
 )
 from selenium.common.exceptions import NoSuchElementException
@@ -32,6 +35,8 @@ from selenium.webdriver.common.by import By
 LIBRARIES_DATA = get_config('opac')['libraries']
 
 class LibraryBase(object): # {{{
+    handlers = []
+
     def __init__(self, books=None):
         self.opener  = None
         self.browser = None
@@ -48,7 +53,7 @@ class LibraryBase(object): # {{{
 
     def init_browser(self):
         # Request used to initialize opener.
-        self.opener = prepare_opener(self.data['url'])
+        self.opener = prepare_opener(self.data['url'], handlers=self.handlers)
 
         # Get redirect url from site response
         redirect_url = open_url(self.data['url'], self.opener).geturl()
@@ -84,6 +89,9 @@ class LibraryBase(object): # {{{
         # Quit browser.
         if self.browser: browser_stop(self.browser)
 
+    def get_next_search_field(self, index):
+        return self.search_fields[index]
+
     def get_books_status(self):
         self.init_browser()
 
@@ -114,17 +122,18 @@ class LibraryBase(object): # {{{
 
     def get_book_info(self, book):
         book_info = None
+        field_idx = 0
 
         # Retry fetching book info (title vs isbn).
-        retry_fetch = 2
-        while not book_info and retry_fetch:
+        search_fields_len = len(self.search_fields)
+        while not book_info and field_idx < search_fields_len:
             # Start browser if required.
             self.retry_load_browser()
             # Check if browser actually started - can't continue without it.
             if not self.browser: break
 
             # Search first by isbn, then by title.
-            search_field = 'title' if retry_fetch % 2 else 'isbn'
+            search_field = self.get_next_search_field(field_idx)
 
             # Try fetching book info.
             try:
@@ -141,7 +150,7 @@ class LibraryBase(object): # {{{
                 if not book_info: continue
             finally:
                 # Is called when except does 'continue'
-                retry_fetch -= 1
+                field_idx += 1
 
             # None - book wasn't found, search by other criteria
             # []   - book was found but is unavailable, end search
@@ -167,24 +176,29 @@ class LibraryBase(object): # {{{
                 break
 
             # Print next loop info.
-            print('Retry book fetching.' if retry_fetch else 'Book not found.')
+            print('Retry book fetching.' if field_idx < search_fields_len else 'Book not found.')
 
         return book_info
 
     def query_book_info(self, book, search_field):
-        if not(search_field in book and book[search_field]):
-            return
-
         # Query book and fetch results.
         results = self.query_book(book, search_field)
         match   = self.get_matching_result(book, search_field, results)
         info    = self.extract_book_info(book, match)
 
         return info
+
+    def find_by_css(self, selector):
+        return self.browser.find_element_by_css_selector(selector)
+
+    def find_all_by_css(self, selector):
+        return self.browser.find_elements_by_css_selector(selector)
 # }}}
 
 class n4949(LibraryBase): # {{{
     data = LIBRARIES_DATA['4949']
+
+    search_fields = ['isbn', 'title']
 
     isbn_re    = re.compile('\D+')
     section_re = re.compile('\s\(\s.+\s\)\s')
@@ -204,6 +218,9 @@ class n4949(LibraryBase): # {{{
     # 9  - Magazine
     # 15 - Audiobook
     def query_book(self, book, search_field):
+        if not(search_field in book and book[search_field]):
+            return
+
         return (self.query_book_by_isbn(book)
                 if search_field == 'isbn'
                 else self.query_book_by_title(book))
@@ -408,149 +425,144 @@ class n4949(LibraryBase): # {{{
 class n5004(LibraryBase): # {{{
     data = LIBRARIES_DATA['5004']
 
-    info_re    = re.compile('^(.+)\.\s-\s.*$')
-    tr_re      = re.compile('^(.+)\s;\s(?:przeł|\[tł).*$')
-    onclick_re = re.compile(u"^javascript:LoadWebPg\('([^']+)',\s'([^']+)'\);.*$")
+    search_fields = ['title_and_author']
+
+    handlers = [get_unverifield_ssl_handler()]
+
+    search_input   = '#SimpleSearchForm_q'
+    search_button  = '.btn.search-main-btn'
+    results_header = '.row.row-full-text'
+
+    items_list_re     = re.compile('prolibitem')
+    item_signature_re = re.compile('dl-horizontal')
+    item_available_re = re.compile('Dostępny')
 
     def pre_process(self):
-        # Close alert box if present.
+        # Wait for submit button to be visible.
         try:
-            alert_box = self.browser.find_element_by_id('alertboxsec')
-            button    = alert_box.find_element_by_tag_name('button')
-            button.click()
+            wait_is_visible_by_css(self.browser, self.search_button)
         except NoSuchElementException:
             pass
 
     def post_process(self):
-        button = self.browser.find_element_by_id('logo_content')
-        link   = button.find_element_by_tag_name('a')
-        link.click()
+        try:
+            button = self.browser.find_element_by_class_name('library_title-pages')
+            link   = button.find_element_by_tag_name('a')
+            link.click()
+        except NoSuchElementException:
+            pass
 
-    def set_search_type_and_value(self, type_id, type_value, search_id, search_value):
-        can_search = (
-            wait_is_visible(self.browser, type_id) and
-            wait_is_visible(self.browser, search_id)
-        )
-
-        if can_search:
-            # Set search type.
-            select_by_id_and_value(self.browser, type_id, type_value)
-            # Input search value.
-            self.browser.find_element_by_id(search_id).send_keys(
-                search_value
-            )
-
-        return can_search
+    def set_search_value(self, search_value):
+        # Input search value.
+        if wait_is_visible_by_css(self.browser, self.search_input):
+            self.find_by_css(self.search_input).send_keys(search_value)
+            return True
+        return False
 
     def query_book(self, book, search_field):
-        search_value = book[search_field]
-        type_value   = 'm21isn' if search_field == 'isbn' else 'm21tytuł'
-        can_search   = self.set_search_type_and_value(
-            'IdSzIdx1', type_value, 'IdTxtSz1', search_value
-        )
-        if search_field != 'isbn':
-            can_search = self.set_search_type_and_value(
-                'IdSzIdx2', 'if100a', 'IdTxtSz2', book['author']
-            )
-
-        # Search fields didn't load properly - can't run query.
-        if not can_search: return None
+        # Search field didn't load properly - can't run query.
+        search_value = '"{0}" AND "{1}"'.format(book['title'], book['author'])
+        if not self.set_search_value(search_value):
+            return None
 
         # Submit form.
-        submit = self.browser.find_element_by_id('search')
-        submit.click()
+        self.find_by_css(self.search_button).click()
 
-        # Search for results in table.
+        # Wait for results to load.
+        wait_is_visible_by_css(self.browser, self.results_header)
+
         results = None
         try:
-           self.browser.find_element_by_class_name('emptyRecord')
+           self.find_by_css('.info-empty')
         except NoSuchElementException:
-            results = self.browser.find_elements_by_class_name('opisokladka')
-
+            # Display up to 100 results on page.
+            self.find_by_css('.btn-group>.hidden-xs').click()
+            if wait_is_visible_by_css(self.browser, '.btn-group.open>.dropdown-menu'):
+                self.find_by_css('.btn-group.open>.dropdown-menu>li:last-child').click()
+            results = self.find_all_by_css('dl.dl-horizontal')
         return results
 
     def get_matching_result(self, book, search_field, results):
         if not results: return
 
         matching = []
-        # Only one result should be returned when searching by ISBN.
-        if search_field == 'isbn' and len(results) == 1:
-            matching.append(results[0].find_element_by_tag_name('a'))
-        else:
-            for result in results:
-                info = self.info_re.search(result.text)
-                if not info: continue
-
-                info_match = info.group(1)
-
-                # Check if entry contains translation info.
-                tr_match = self.tr_re.search(info_match)
-                # Remove translation info.
-                if tr_match: info_match = tr_match.group(1)
-
-                if not info_match: return
-
-                # Extract title and author form entry.
-                title, author = info_match.split('/')
-                # Check if author and title match.
-                title_ratio   = fuzz.partial_ratio(book['title'], title)
-                author_ratio  = fuzz.partial_ratio(book['author'], author)
-                # If title or author matches > 95% then collect results.
-                if title_ratio < 95 and author_ratio < 95: continue
-
-                matching.append(result.find_element_by_tag_name('a'))
+        for result in results:
+            book_anchor = result.find_element_by_tag_name('a')
+            if book_anchor:
+                matching.append(book_anchor.get_attribute('href'))
 
         return matching
 
     def extract_book_info(self, book, results):
         if not (book and results): return
 
-        book_info = []
-        for match in results:
-            onclick_match = self.onclick_re.search(match.get_attribute('onclick'))
-            if not onclick_match: continue
+        book_info = None
+        for book_url in results:
+            # All books are available in the same section.
+            if book_info: break
 
-            url_suffix, query_params = onclick_match.groups()
-
-            book_url = '{0}{1}?{2}{3}'.format(self.data['base_url'],
-                                              url_suffix,
-                                              self.query_string,
-                                              query_params)
-
-            response = get_parsed_url_response(book_url, opener=self.opener)
-            if not response: continue
-
-            # Extract book info from rows.
-            info_table = response.find('table', {'class': 'tabOutWyniki_w'})
-
-            # Fetch all book entries without the table header.
-            info_rows = info_table.find_all('tr')[1:] if info_table else None
-            if not info_rows:
+            response   = get_parsed_url_response(book_url, opener=self.opener)
+            items_list = response.findAll('div', { 'class': self.items_list_re })
+            if not items_list:
                 response.decompose()
                 continue
 
-            found_section = None
-            for row in info_rows:
-                # Extract book location, section and availability from row.
-                signature       = row.td.find_next('td')
-                signature_value = signature.text.split()
-                # Skip books without section name.
-                if len(signature_value) < 2: continue
+            book_info = self.extract_single_book_info(
+                response.find('input', {'name': 'YII_CSRF_TOKEN'}).get('value'),
+                items_list,
+            )
 
-                # Check if address is in accepted list.
-                location, section = signature_value[0:2]
-                if not location in self.data['accepted_locations']: continue
-
-                # Check if book is available.
-                status_value = signature.find_next('td').text
-                if status_value != self.data['accepted_status']: continue
-
-                found_section = section
-                break
-
-            if found_section:
-                book_info.append((self.data['department'], found_section))
             response.decompose()
 
+        return [book_info] if book_info else None
+
+    def extract_single_book_info(self, yii_token, items_list):
+        book_info = None
+        for item in items_list:
+            # Check if book is available.
+            is_book_available = self.get_book_accessibility(yii_token, item)
+            if not is_book_available: continue
+
+            # Extract book location, section and availability from row.
+            item_signatures = item.div.find('dl', { 'class': self.item_signature_re })\
+                                      .find_all('dd')
+            if not item_signatures: continue
+
+            signature_values = item_signatures[-1].text.split()
+            # Skip books without section name.
+            if len(signature_values) < 2: continue
+
+            # Check if address is in accepted list.
+            location = signature_values[0]
+            if not location in self.data['accepted_locations']: continue
+            # Get full section name.
+            section = ' '.join(signature_values[1:])
+            book_info = (self.data['department'], section)
+
+            # All remaining available books will be in the same section.
+            break
         return book_info
+
+    def get_book_accessibility(self, yii_token, result):
+        accessibility_url = '{0}/ajax/getaccessibilityicon'.format(
+            self.data['base_url']
+        );
+        accessibility_params = {
+            "docid": result.get('data-item-id'),
+            "doclibid": result.get('data-item-lib-id'),
+            "YII_CSRF_TOKEN": yii_token,
+        }
+        accessibility_params['libid'] = accessibility_params['doclibid'];
+
+        accessibility_result = get_parsed_url_response(
+            accessibility_url,
+            data=encode_url_params(accessibility_params),
+            opener=self.opener,
+        )
+        is_book_available = self.item_available_re.search(
+            accessibility_result.div.text
+        )
+        accessibility_result.decompose()
+
+        return True if is_book_available else False
 # }}}

@@ -2,15 +2,16 @@
 
 # Import {{{
 import os
+import ssl
 import sys
 import json
 import codecs
 from http.cookiejar import CookieJar
 from http.client import BadStatusLine
-from urllib.request import (build_opener, HTTPCookieProcessor, Request)
+from urllib.request import (build_opener, HTTPCookieProcessor, HTTPSHandler,  Request)
 from urllib.error import (HTTPError, URLError)
 from urllib.parse import urlparse, urlencode
-from bs4 import BeautifulSoup
+from bs4 import BeautifulSoup, Comment
 from multiprocessing.dummy import Lock
 # }}}
 
@@ -61,16 +62,18 @@ def dump_json_file(struct, file_path):
 
     return
 
+def get_unverifield_ssl_handler():
+    return HTTPSHandler(context=ssl._create_unverified_context())
 
-def prepare_opener(url, headers=None, data=None, cookie_jar=None):
+def prepare_opener(url, headers=None, data=None, handlers=None, cookie_jar=None):
     # Prepare jar for cookies.
     if cookie_jar is None: cookie_jar = CookieJar()
 
+    if handlers is None: handlers = []
+    handlers.append(HTTPCookieProcessor(cookie_jar))
+
     # Prepare request handler.
-    opener     = build_opener(
-        HTTPCookieProcessor(cookie_jar),
-        # urllib.request.HTTPHandler(debuglevel=1),
-    )
+    opener = build_opener(*handlers)
 
     # Prepare request headers.
     headers = headers if headers else {}
@@ -111,7 +114,11 @@ def parse_url_response(response, verbose=True):
     parser = None
     if response:
         try:
-            parser = BeautifulSoup(response, "lxml")
+            parser = BeautifulSoup(
+                # Convert results to utf-8 encoding.
+                response.read().decode('utf-8', 'ignore'),
+                "lxml",
+            )
         except TypeError:
             if verbose:
                 print(u'Error parsing response.')
@@ -137,6 +144,9 @@ def get_url_net_location(url):
 def build_url(base_url, query):
     if not base_url: return ''
     return '{0}?{1}'.format( base_url, urlencode(query or {}) )
+
+def encode_url_params(params):
+    return urlencode(params).encode("utf-8")
 
 def print_progress(lock=Lock()):
     with lock:

@@ -45,10 +45,10 @@ def select_by_id_and_value(browser, select_id, select_value):
             select.select_by_value(select_value)
     return select
 
-def set_input_value(browser, input_id, input_value):
-    if (wait_is_visible(browser, input_id)):
-        text_field = browser.find_element_by_id(input_id)
-        text_field.send_keys(input_value)
+def set_input_value(browser, locator, value, using=By.ID):
+    if (wait_is_visible(browser, locator, using=using)):
+        field = browser.find_element_by(by=using, value=locator)
+        field.send_keys(value)
 
 def wait_is_visible(browser, locator, using=By.ID, timeout=5):
     try:
@@ -60,6 +60,9 @@ def wait_is_visible(browser, locator, using=By.ID, timeout=5):
         return True
     except (TimeoutException, NoSuchElementException):
         return False
+
+def wait_is_visible_by_css(browser, locator):
+    return wait_is_visible(browser, locator, By.CSS_SELECTOR)
 
 def wait_is_not_visible(browser, locator, using=By.ID, timeout=5):
     try:
