@@ -476,9 +476,10 @@ class n5004(LibraryBase): # {{{
            self.find_by_css('.info-empty')
         except NoSuchElementException:
             # Display up to 100 results on page.
-            self.find_by_css('.btn-group>.hidden-xs').click()
-            if wait_is_visible_by_css(self.browser, '.btn-group.open>.dropdown-menu'):
-                self.find_by_css('.btn-group.open>.dropdown-menu>li:last-child').click()
+            if wait_is_visible_by_css(self.browser, '.btn-group>.hidden-xs'):
+                self.find_by_css('.btn-group>.hidden-xs').click()
+                if wait_is_visible_by_css(self.browser, '.btn-group.open>.dropdown-menu'):
+                    self.find_by_css('.btn-group.open>.dropdown-menu>li:last-child').click()
             results = self.find_all_by_css('dl.dl-horizontal')
         return results
 
