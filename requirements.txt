@@ -1,3 +1,4 @@
+wheel
 beautifulsoup4
 fuzzywuzzy
 lxml

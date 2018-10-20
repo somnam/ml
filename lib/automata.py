@@ -24,7 +24,7 @@ def browser_start():
     # Load webdriver.
     browser = webdriver.Firefox(
         firefox_profile=profile,
-        executable_path=get_file_path('env/bin/geckodriver'),
+        executable_path=get_file_path('bin/geckodriver'),
     )
     return browser
 
