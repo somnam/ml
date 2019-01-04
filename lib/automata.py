@@ -9,11 +9,10 @@ from selenium.common.exceptions import TimeoutException, NoSuchElementException
 from selenium.webdriver.common.by import By
 from selenium.webdriver.support import expected_conditions
 from selenium.webdriver.support.ui import Select, WebDriverWait
-from selenium.webdriver.firefox.firefox_binary import FirefoxBinary
 # }}}
 
 def browser_start():
-    print(u'Starting browser.')
+    print('Starting browser.')
 
     # Disable browser auto-updates.
     profile = webdriver.FirefoxProfile()
@@ -47,7 +46,7 @@ def select_by_id_and_value(browser, select_id, select_value):
 
 def set_input_value(browser, locator, value, using=By.ID):
     if (wait_is_visible(browser, locator, using=using)):
-        field = browser.find_element_by(by=using, value=locator)
+        field = browser.find_element(by=using, value=locator)
         field.send_keys(value)
 
 def wait_is_visible(browser, locator, using=By.ID, timeout=5):

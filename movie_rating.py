@@ -5,10 +5,11 @@
 import os
 import re
 import urllib
-import urllib2
 import json
+from urllib.request import Request
 from optparse import OptionParser
-from multiprocessing.dummy import Pool, cpu_count, Lock
+from multiprocessing import cpu_count
+from multiprocessing.dummy import Pool, Lock
 from lib.diskcache import diskcache, MONTH
 from fuzzywuzzy import fuzz
 from lib.common import (
@@ -99,7 +100,7 @@ def prepare_site_opener(site_url):
     opener = prepare_opener(site_url)
 
     # Initialize cookie.
-    request    = urllib2.Request(site_url)
+    request    = Request(site_url)
     opener.open(request)
 
     return opener
@@ -299,7 +300,7 @@ def extract_folders(extract_path):
         make_dir_if_not_exists(dir_path)
 
 def get_worksheet_name():
-    return u'Filmoceny'
+    return 'Filmoceny'
 
 def write_movies_to_google_docs(auth_data, headers, info):
     info.insert(0, headers)
@@ -309,7 +310,7 @@ def write_movies_to_google_docs(auth_data, headers, info):
     client = get_service_client(auth_data)
 
     print('Writing movies info.')
-    spreadsheet_title = u'Karty'
+    spreadsheet_title = 'Karty'
     write_rows_to_worksheet(
         client,
         spreadsheet_title,
@@ -321,7 +322,7 @@ def write_movies_to_xls(headers, info):
     headers_lc = [header.lower() for header in headers]
     info_map   = [dict(zip(headers_lc, entry)) for entry in info]
 
-    print(u'Writing movies info.')
+    print('Writing movies info.')
     return make_xls(
         'movie_rating',
         get_worksheet_name(),
@@ -334,10 +335,10 @@ def fetch_movie_ratings(directory, auth_data):
     workers_count = cpu_count()
     pool          = Pool(workers_count)
 
-    print(u'Reading movies directory.')
+    print('Reading movies directory.')
     tokens = pool.map(extract_tokens, os.listdir(directory))
 
-    print(u'Fetching %d movies info.' % len(tokens))
+    print('Fetching %d movies info.' % len(tokens))
     info   = pool.map(extract_info, tokens)
     # End progress print.
     print_progress_end()

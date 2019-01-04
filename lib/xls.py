@@ -63,7 +63,7 @@ def make_xls(file_name, worksheet_name, worksheet_headers, entries):
 
 def open_workbook(file_name):
     if not file_name:
-        return None, u'Please provide a correct xls file.'
+        return None, 'Please provide a correct xls file.'
 
     workbook, error = None, None
     try:
@@ -71,7 +71,7 @@ def open_workbook(file_name):
         workbook      = load_workbook(workbook_path)
     except (IOError, InvalidFileException) as e:
         message = e.strerror if hasattr(e, 'strerror') else e.message
-        error   = u'Error: {0}'.format(message)
+        error   = 'Error: {0}'.format(message)
 
     return workbook, error
 

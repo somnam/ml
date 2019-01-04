@@ -31,7 +31,7 @@ def make_dir_if_not_exists(dir_path):
             if not os.path.isdir(dir_path):
                 raise
         else:
-            print(u'Creating path %s' % dir_path.decode('utf-8'))
+            print('Creating path %s' % dir_path)
 
 def get_json_file(file_name):
 
@@ -121,7 +121,7 @@ def parse_url_response(response, verbose=True):
             )
         except TypeError:
             if verbose:
-                print(u'Error parsing response.')
+                print('Error parsing response.')
 
     return parser
 
