@@ -3,10 +3,7 @@
 # Import {{{
 import re
 import json
-import time
 import socket
-from math import floor
-from fuzzywuzzy import fuzz
 from lib.diskcache import diskcache, DAY
 from lib.common import (
     open_url,
@@ -34,13 +31,14 @@ from selenium.webdriver.common.by import By
 
 LIBRARIES_DATA = get_config('opac')['libraries']
 
-class LibraryBase(object): # {{{
+
+class LibraryBase:  # {{{
     handlers = []
 
     def __init__(self, books=None):
-        self.opener  = None
+        self.opener = None
         self.browser = None
-        self.books   = [] if books is None else books
+        self.books = [] if books is None else books
 
     def get_book_uid(self, book):
         return '{0}:{1}'.format(self.data['id'], book['isbn'])
@@ -87,7 +85,8 @@ class LibraryBase(object): # {{{
 
     def stop_browser(self):
         # Quit browser.
-        if self.browser: browser_stop(self.browser)
+        if self.browser:
+            browser_stop(self.browser)
 
     def get_next_search_field(self, index):
         return self.search_fields[index]
@@ -102,11 +101,13 @@ class LibraryBase(object): # {{{
         for book in self.books:
             # Skip if book was already fetched
             book_uid = self.get_book_uid(book)
-            if book_uid in books_status: continue
+            if book_uid in books_status:
+                continue
             # Fetch book info
             book_json = cached_book_info_wrapper(book_uid)
             # Don't append empty info.
-            if not book_json: continue
+            if not book_json:
+                continue
             books_status[book_uid] = json.loads(book_json)
 
         self.stop_browser()
@@ -130,7 +131,8 @@ class LibraryBase(object): # {{{
             # Start browser if required.
             self.retry_load_browser()
             # Check if browser actually started - can't continue without it.
-            if not self.browser: break
+            if not self.browser:
+                break
 
             # Search first by isbn, then by title.
             search_field = self.get_next_search_field(field_idx)
@@ -147,7 +149,8 @@ class LibraryBase(object): # {{{
                 # Remove object.
                 self.browser = None
                 # Retry fetching book with same params and a new browser.
-                if not book_info: continue
+                if not book_info:
+                    continue
             finally:
                 # Is called when except does 'continue'
                 field_idx += 1
@@ -161,12 +164,12 @@ class LibraryBase(object): # {{{
                 print('Successfully queried book info.')
                 # Return info in json format.
                 book_info = json.dumps([{
-                    'author':     book['author'],
-                    'title':      '"{0}"'.format(book['title']),
+                    'author': book['author'],
+                    'title': '"{0}"'.format(book['title']),
                     'department': entry[0],
-                    'section':    entry[1],
-                    'pages':      book['pages'],
-                    'link':       book['url'],
+                    'section': entry[1],
+                    'pages': book['pages'],
+                    'link': book['url'],
                 } for entry in book_info])
                 break
             # If book is unavailable then don't search for it a second time.
@@ -183,8 +186,8 @@ class LibraryBase(object): # {{{
     def query_book_info(self, book, search_field):
         # Query book and fetch results.
         results = self.query_book(book, search_field)
-        match   = self.get_matching_result(book, search_field, results)
-        info    = self.extract_book_info(book, match)
+        match = self.get_matching_result(book, search_field, results)
+        info = self.extract_book_info(book, match)
 
         return info
 
@@ -195,17 +198,18 @@ class LibraryBase(object): # {{{
         return self.browser.find_elements_by_css_selector(selector)
 # }}}
 
-class n4949(LibraryBase): # {{{
+
+class n4949(LibraryBase):  # {{{
     data = LIBRARIES_DATA['4949']
 
     search_fields = ['isbn', 'title']
 
-    isbn_re    = re.compile('\D+')
-    section_re = re.compile('\s\(\s.+\s\)\s')
+    isbn_re = re.compile(r'\D+')
+    section_re = re.compile(r'\s\(\s.+\s\)\s')
 
-    search_type_id     = 'form1:dropdown1'
-    resource_type_id   = 'form1:dropdown4'
-    clear_button_id    = 'form1:btnCzyscForme'
+    search_type_id = 'form1:dropdown1'
+    resource_type_id = 'form1:dropdown4'
+    clear_button_id = 'form1:btnCzyscForme'
 
     # Search type:
     # 1 - Author
@@ -229,7 +233,8 @@ class n4949(LibraryBase): # {{{
         # Select standard or advanced form.
         links_wrapper = self.browser.find_element_by_class_name('historia')
         for link in links_wrapper.find_elements_by_tag_name('a'):
-            if link.text != form_type: continue
+            if link.text != form_type:
+                continue
             link.click()
             break
 
@@ -247,9 +252,9 @@ class n4949(LibraryBase): # {{{
             wait_is_not_visible(self.browser, autocomp_popup_id)
 
     def query_book_by_isbn(self, book):
-        search_type        = '3'
-        resource_type      = '2'
-        submit_button_id   = 'form1:btnSzukajIndeks'
+        search_type = '3'
+        resource_type = '2'
+        submit_button_id = 'form1:btnSzukajIndeks'
         results_list_xpath = '//ul[@class="kl"]'
 
         # Select standard form.
@@ -284,7 +289,7 @@ class n4949(LibraryBase): # {{{
         return results
 
     def query_book_by_title(self, book):
-        resource_type    = '2'
+        resource_type = '2'
         submit_button_id = 'form1:btnSzukajOpisow'
 
         # Select advanced form.
@@ -292,7 +297,7 @@ class n4949(LibraryBase): # {{{
 
         # Input book author.
         author_name_list = book['author'].split(' ')
-        author_string    = '{0}, {1}'.format(
+        author_string = '{0}, {1}'.format(
             author_name_list.pop(),
             ' '.join(author_name_list)
         )
@@ -320,9 +325,10 @@ class n4949(LibraryBase): # {{{
         return results
 
     def get_matching_result(self, book, search_field, results):
-        if not results: return
+        if not results:
+            return
 
-        return (self.get_matching_result_isbn(book, results) 
+        return (self.get_matching_result_isbn(book, results)
                 if search_field == 'isbn'
                 else self.get_matching_result_title(book, results))
 
@@ -333,7 +339,8 @@ class n4949(LibraryBase): # {{{
         for elem in results:
             # Replace all non-numeric characters in isbn.
             elem_value = self.isbn_re.sub('', elem.text)
-            if elem_value != match_value: continue
+            if elem_value != match_value:
+                continue
 
             matching = self.extract_matching_results(elem)
             break
@@ -341,8 +348,6 @@ class n4949(LibraryBase): # {{{
         return matching
 
     def get_matching_result_title(self, book, results):
-        match_value = book['title']
-
         matching = []
         for elem in results:
             book_id = elem.get_attribute('id').replace('dvop', '')
@@ -360,7 +365,7 @@ class n4949(LibraryBase): # {{{
                       .find_element_by_class_name('zawartosc')
         results = []
         try:
-            results = [match.get_attribute('href') 
+            results = [match.get_attribute('href')
                        for match in content.find_elements_by_tag_name('a')]
         except NoSuchElementException:
             pass
@@ -368,52 +373,52 @@ class n4949(LibraryBase): # {{{
         return results
 
     def extract_book_info(self, book, results):
-        if not (book and results): return
+        if not (book and results):
+            return
 
         book_info = []
         for book_url in results:
             response = get_parsed_url_response(book_url, opener=self.opener)
-            resource = response.find('div', { 'id': 'zasob' })
-            if (not resource or
-                not resource.contents or
-                resource.text.strip() == 'Brak zasobu'
-            ):
+            resource = response.find('div', {'id': 'zasob'})
+            if (not resource or not resource.contents or resource.text.strip() == 'Brak zasobu'):
                 response.decompose()
                 continue
 
-            ul = resource.find('ul', { 'class': 'zas_filie' })
+            ul = resource.find('ul', {'class': 'zas_filie'})
             for li in ul.find_all('li'):
-                department_info = li.find('div', { 'class': 'filia' })
+                department_info = li.find('div', {'class': 'filia'})
 
                 # Get library address.
                 department, address = '', ''
                 if (department_info and department_info.contents):
                     department = department_info.contents[0]
-                    location   = (department_info.contents[-1].split(',')
-                                  if department_info.contents[-1] else None)
-                    address    = (location[0] if location else None)
+                    location = (department_info.contents[-1].split(',')
+                                if department_info.contents[-1] else None)
+                    address = (location[0] if location else None)
 
                 # Check if address is in accepted list.
-                if not address in self.data['accepted_locations']: continue
+                if address not in self.data['accepted_locations']:
+                    continue
 
                 # Check if book is rented/not available.
-                warning       = li.find('div', { 'class': 'opis_uwaga' })
-                not_available = li.find('img', { 'title': 'Pozycja nie do wypożyczenia' })
+                warning = li.find('div', {'class': 'opis_uwaga'})
+                not_available = li.find('img', {'title': 'Pozycja nie do wypożyczenia'})
                 if (not_available or (warning and warning.text)):
                     continue
 
                 # Get availability info.
                 availability = [int(d) for d in
-                                li.find('div', { 'class': 'dostepnosc' }).text.split()
+                                li.find('div', {'class': 'dostepnosc'}).text.split()
                                 if d.isdigit()]
 
                 # Book is not available.
-                if not(availability and availability[0]): continue
+                if not(availability and availability[0]):
+                    continue
 
                 # Extract section name.
-                section_info  = li.find('table', {'class': 'zasob'}).td.find_next('td')
+                section_info = li.find('table', {'class': 'zasob'}).td.find_next('td')
                 section_match = self.section_re.search(section_info.text)
-                section       = section_match.group().strip() if section_match else ''
+                section = section_match.group().strip() if section_match else ''
 
                 book_info.append((department, section))
 
@@ -422,18 +427,19 @@ class n4949(LibraryBase): # {{{
         return book_info
 # }}}
 
-class n5004(LibraryBase): # {{{
+
+class n5004(LibraryBase):  # {{{
     data = LIBRARIES_DATA['5004']
 
     search_fields = ['title_and_author']
 
     handlers = [get_unverifield_ssl_handler()]
 
-    search_input   = '#SimpleSearchForm_q'
-    search_button  = '.btn.search-main-btn'
+    search_input = '#SimpleSearchForm_q'
+    search_button = '.btn.search-main-btn'
     results_header = '.row.row-full-text'
 
-    items_list_re     = re.compile('prolibitem')
+    items_list_re = re.compile('prolibitem')
     item_signature_re = re.compile('dl-horizontal')
     item_available_re = re.compile('Dostępny')
 
@@ -447,7 +453,7 @@ class n5004(LibraryBase): # {{{
     def post_process(self):
         try:
             button = self.browser.find_element_by_class_name('library_title-pages')
-            link   = button.find_element_by_tag_name('a')
+            link = button.find_element_by_tag_name('a')
             link.click()
         except NoSuchElementException:
             pass
@@ -473,7 +479,7 @@ class n5004(LibraryBase): # {{{
 
         results = None
         try:
-           self.find_by_css('.info-empty')
+            self.find_by_css('.info-empty')
         except NoSuchElementException:
             # Display up to 100 results on page.
             if wait_is_visible_by_css(self.browser, '.btn-group>.hidden-xs'):
@@ -484,7 +490,8 @@ class n5004(LibraryBase): # {{{
         return results
 
     def get_matching_result(self, book, search_field, results):
-        if not results: return
+        if not results:
+            return
 
         matching = []
         for result in results:
@@ -495,15 +502,17 @@ class n5004(LibraryBase): # {{{
         return matching
 
     def extract_book_info(self, book, results):
-        if not (book and results): return
+        if not (book and results):
+            return
 
         book_info = None
         for book_url in results:
             # All books are available in the same section.
-            if book_info: break
+            if book_info:
+                break
 
-            response   = get_parsed_url_response(book_url, opener=self.opener)
-            items_list = response.findAll('div', { 'class': self.items_list_re })
+            response = get_parsed_url_response(book_url, opener=self.opener)
+            items_list = response.findAll('div', {'class': self.items_list_re})
             if not items_list:
                 response.decompose()
                 continue
@@ -522,20 +531,24 @@ class n5004(LibraryBase): # {{{
         for item in items_list:
             # Check if book is available.
             is_book_available = self.get_book_accessibility(yii_token, item)
-            if not is_book_available: continue
+            if not is_book_available:
+                continue
 
             # Extract book location, section and availability from row.
-            item_signatures = item.div.find('dl', { 'class': self.item_signature_re })\
+            item_signatures = item.div.find('dl', {'class': self.item_signature_re})\
                                       .find_all('dd')
-            if not item_signatures: continue
+            if not item_signatures:
+                continue
 
             signature_values = item_signatures[-1].text.split()
             # Skip books without section name.
-            if len(signature_values) < 2: continue
+            if len(signature_values) < 2:
+                continue
 
             # Check if address is in accepted list.
             location = signature_values[0]
-            if not location in self.data['accepted_locations']: continue
+            if location not in self.data['accepted_locations']:
+                continue
             # Get full section name.
             section = ' '.join(signature_values[1:])
             book_info = (self.data['department'], section)
@@ -547,13 +560,13 @@ class n5004(LibraryBase): # {{{
     def get_book_accessibility(self, yii_token, result):
         accessibility_url = '{0}/ajax/getaccessibilityicon'.format(
             self.data['base_url']
-        );
+        )
         accessibility_params = {
             "docid": result.get('data-item-id'),
             "doclibid": result.get('data-item-lib-id'),
             "YII_CSRF_TOKEN": yii_token,
         }
-        accessibility_params['libid'] = accessibility_params['doclibid'];
+        accessibility_params['libid'] = accessibility_params['doclibid']
 
         accessibility_result = get_parsed_url_response(
             accessibility_url,

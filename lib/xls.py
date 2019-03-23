@@ -8,8 +8,10 @@ from openpyxl.utils.exceptions import InvalidFileException
 from lib.common import get_file_path
 # }}}
 
+
 def make_xls(file_name, worksheet_name, worksheet_headers, entries):
-    if not entries: return
+    if not entries:
+        return
 
     # Create a new workbook.
     workbook = Workbook()
@@ -23,8 +25,7 @@ def make_xls(file_name, worksheet_name, worksheet_headers, entries):
 
     # Colum widths will be stored here
     column_widths = [10 for _ in worksheet_headers]
-    no_newlie_re  = re.compile(r'^[^\n]*$')
-    len_lambda    = lambda e: len(e)
+    no_newlie_re = re.compile(r'^[^\n]*$')
     # Add rows
     for entry in entries:
         row = []
@@ -39,7 +40,7 @@ def make_xls(file_name, worksheet_name, worksheet_headers, entries):
             if no_newlie_re.match(entry_value):
                 entry_length = len(entry_value)
             else:
-                entry_length = len(max(entry_value.split(u"\n"), key=len_lambda))
+                entry_length = len(max(entry_value.split(u"\n"), key=len))
 
             # Adjust column width according to text length.
             if entry_length > column_widths[index]:
@@ -52,7 +53,7 @@ def make_xls(file_name, worksheet_name, worksheet_headers, entries):
     # Set column dimensions.
     for index in range(len(worksheet_headers)):
         # Worksheet indices start from 1.
-        column_letter     = get_column_letter(index+1)
+        column_letter = get_column_letter(index + 1)
         column_dimensions = sheet.column_dimensions[column_letter]
 
         column_dimensions.width = column_widths[index]
@@ -61,6 +62,7 @@ def make_xls(file_name, worksheet_name, worksheet_headers, entries):
     workbook_path = get_file_path('{0}.xls'.format(file_name))
     workbook.save(workbook_path)
 
+
 def open_workbook(file_name):
     if not file_name:
         return None, 'Please provide a correct xls file.'
@@ -68,12 +70,13 @@ def open_workbook(file_name):
     workbook, error = None, None
     try:
         workbook_path = get_file_path(file_name)
-        workbook      = load_workbook(workbook_path)
+        workbook = load_workbook(workbook_path)
     except (IOError, InvalidFileException) as e:
         message = e.strerror if hasattr(e, 'strerror') else e.message
-        error   = 'Error: {0}'.format(message)
+        error = 'Error: {0}'.format(message)
 
     return workbook, error
+
 
 def save_workbook(workbook, file_name):
     workbook_path = get_file_path(file_name)

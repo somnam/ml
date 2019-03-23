@@ -6,8 +6,10 @@ from gspread.exceptions import SpreadsheetNotFound, WorksheetNotFound
 from oauth2client.service_account import ServiceAccountCredentials
 # }}}
 
+
 def get_service_client(auth):
-    if not auth: return
+    if not auth:
+        return
 
     credentials = ServiceAccountCredentials.from_json_keyfile_name(auth, [
         'https://spreadsheets.google.com/feeds',
@@ -15,8 +17,10 @@ def get_service_client(auth):
     ])
     return gspread.authorize(credentials)
 
+
 def get_workbook(client, workbook_title):
-    if not client: return
+    if not client:
+        return
 
     try:
         workbook = client.open(workbook_title)
@@ -25,8 +29,10 @@ def get_workbook(client, workbook_title):
 
     return workbook
 
+
 def get_writable_worksheet(client, workbook_title, worksheet_title, rows_n, cols_n):
-    if not client: return
+    if not client:
+        return
 
     workbook = get_workbook(client, workbook_title)
 
@@ -46,8 +52,10 @@ def get_writable_worksheet(client, workbook_title, worksheet_title, rows_n, cols
 
     return worksheet
 
+
 def write_to_cells(worksheet, rows):
-    if not(worksheet and rows): return
+    if not(worksheet and rows):
+        return
 
     # Get cells for writing rows.
     cells = worksheet.range(1, 1, worksheet.row_count, worksheet.col_count)
@@ -62,8 +70,10 @@ def write_to_cells(worksheet, rows):
     # Execute batch update of destination cells.
     worksheet.update_cells(cells)
 
+
 def write_rows_to_worksheet(client, workbook_title, worksheet_title, rows):
-    if not(client and rows): return
+    if not(client and rows):
+        return
 
     worksheet = get_writable_worksheet(
         client, workbook_title, worksheet_title, len(rows), len(rows[0])

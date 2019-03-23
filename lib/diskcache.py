@@ -6,17 +6,19 @@ from hashlib import sha1
 from functools import wraps
 from multiprocessing.dummy import Lock
 
-HOUR  = 60
-DAY   = 24*HOUR
-WEEK  = 7*DAY
-MONTH = 30*WEEK
-YEAR  = 365*MONTH
+HOUR = 60
+DAY = 24 * HOUR
+WEEK = 7 * DAY
+MONTH = 30 * WEEK
+YEAR = 365 * MONTH
+
 
 def diskcache(argument=None, *args, **kwargs):
     # Allow decorating methods as @diskcache or @diskcache(args)
     return (diskcache_decorator(argument, *args, **kwargs)
             if callable(argument)
             else lambda function: diskcache_decorator(function, argument, *args, **kwargs))
+
 
 def diskcache_decorator(function, invalidate_time=None, db_name='diskcache.db'):
     connector = SQLiteConnector.instance(db_name, inspect.getfile(function))
@@ -28,7 +30,8 @@ def diskcache_decorator(function, invalidate_time=None, db_name='diskcache.db'):
             connector.invalidate_cache(function.__name__, invalidate_time)
         # Return cached value if present.
         result, hit = connector.get_cache(function.__name__, *args, **kwargs)
-        if hit: return result
+        if hit:
+            return result
 
         # Call wrapped method with orginal arguments.
         result = function(*args, **kwargs)
@@ -38,6 +41,7 @@ def diskcache_decorator(function, invalidate_time=None, db_name='diskcache.db'):
 
         return result
     return diskcache_wrapper
+
 
 class SQLiteConnector:
     __instance = None
@@ -53,8 +57,8 @@ class SQLiteConnector:
         self.connection.row_factory = sqlite3.Row
 
         self.cursor = self.connection.cursor()
-        self.table  = self.get_table(file_name)
-        self.lock   = Lock()
+        self.table = self.get_table(file_name)
+        self.lock = Lock()
 
         self.create_cache_table()
 
@@ -106,7 +110,7 @@ class SQLiteConnector:
 
     def set_cache(self, result, function_name, *args, **kwargs):
         # Calculate fingerprint for current function and arguments.
-        fingerprint  = self.get_fingerprint(function_name, *args, **kwargs)
+        fingerprint = self.get_fingerprint(function_name, *args, **kwargs)
         # Encode result value as json, revert to raw value if it fails.
         try:
             result_value = dumps(result) if result else None
@@ -127,7 +131,7 @@ class SQLiteConnector:
         file_name = os.path.basename(file_name)
         # Keep only alphanumeric characters for table name.
         return ''.join(char for char in file_name.replace('.py', '')
-                            if char.isalnum())
+                       if char.isalnum())
 
     @staticmethod
     def get_fingerprint(function_name, *args, **kwargs):

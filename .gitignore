@@ -12,3 +12,5 @@
 # Environment
 env/
 bin/
+tags
+.python-version
