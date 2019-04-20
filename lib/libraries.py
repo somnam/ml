@@ -161,7 +161,8 @@ class LibraryBase:  # {{{
 
             # Book has been successfully queried or is not for rent.
             if book_info:
-                print('Successfully queried book info.')
+                print(f'Successfully queried "{book["title"]}"'
+                      f' by "{book["author"]}" info.')
                 # Return info in json format.
                 book_info = json.dumps([{
                     'author': book['author'],
@@ -174,7 +175,8 @@ class LibraryBase:  # {{{
                 break
             # If book is unavailable then don't search for it a second time.
             elif is_unavailable:
-                print('Book not available.')
+                print(f'Book "{book["title"]}" by "{book["author"]}"'
+                      f' not available.')
                 book_info = None
                 break
 

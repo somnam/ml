@@ -306,7 +306,7 @@ def dump_books_list(shelf_books, file_name):
     if shelf_books:
         # Save sorted list to json
         print("Dumping results to file %s." % file_name)
-        dump_json_file(shelf_books, get_file_path(file_name))
+        dump_json_file(shelf_books, get_file_path('var', file_name))
 
     return
 
@@ -358,7 +358,7 @@ def fetch_shelf_list(profile_id, shelf_name=None, shelf_url=None, include_price=
         # Dump list of books to file
         if not file_name:
             profile_name = get_profile_name(profile_id)
-            file_name = '{0}_{1}.json'.format(profile_name, shelf_name)
+            file_name = f'{profile_name}_{shelf_name}.json'
         dump_books_list(shelf_books, file_name)
     else:
         print('No books were found for shelf "{0}".'.format(shelf_name))

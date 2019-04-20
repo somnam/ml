@@ -20,7 +20,7 @@ def diskcache(argument=None, *args, **kwargs):
             else lambda function: diskcache_decorator(function, argument, *args, **kwargs))
 
 
-def diskcache_decorator(function, invalidate_time=None, db_name='diskcache.db'):
+def diskcache_decorator(function, invalidate_time=None, db_name='./var/diskcache.db'):
     connector = SQLiteConnector.instance(db_name, inspect.getfile(function))
 
     @wraps(function)

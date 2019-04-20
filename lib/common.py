@@ -16,12 +16,12 @@ from multiprocessing.dummy import Lock
 # }}}
 
 
-def get_file_path(file_name):
-    return os.path.join(os.getcwd(), file_name)
+def get_file_path(*file_name):
+    return os.path.join(os.getcwd(), *file_name)
 
 
-def remove_file(file_name):
-    file_path = get_file_path(file_name)
+def remove_file(*file_name):
+    file_path = get_file_path(*file_name)
     if os.path.isfile(file_path):
         os.remove(file_path)
 
@@ -37,9 +37,9 @@ def make_dir_if_not_exists(dir_path):
             print('Creating path %s' % dir_path)
 
 
-def get_json_file(file_name):
+def get_json_file(*file_name):
 
-    file_path = get_file_path(file_name)
+    file_path = get_file_path(*file_name)
 
     file_data = None
     try:
@@ -54,7 +54,7 @@ def get_json_file(file_name):
 
 def get_config(script_name):
     if script_name is not None and len(script_name):
-        config = get_json_file('config.json')
+        config = get_json_file('etc', 'config.json')
         script_config = config[script_name] if script_name in config else None
     return (script_config or {})
 

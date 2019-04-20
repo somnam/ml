@@ -49,7 +49,7 @@ def get_today_date():
 
 
 def get_books_list(file_name):
-    file_path = get_file_path(file_name)
+    file_path = get_file_path('var', file_name)
 
     books_list = None
     with codecs.open(file_path, 'r', 'utf-8') as file_handle:
