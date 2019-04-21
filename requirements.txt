@@ -1,4 +1,3 @@
-wheel
 beautifulsoup4
 fuzzywuzzy
 lxml
@@ -7,3 +6,4 @@ gspread
 openpyxl
 python-Levenshtein
 selenium == 3.*
+xvfbwrapper

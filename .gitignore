@@ -5,12 +5,12 @@
 # Project
 *.json
 *.xls
+*.xlsx
 *.cache
 *.log
 *.db
 
 # Environment
-env/
 bin/
 tags
 .python-version

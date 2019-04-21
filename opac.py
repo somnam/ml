@@ -1,5 +1,3 @@
-# -*- coding: utf-8 -*-
-
 # Import {{{
 import re
 import sys
@@ -8,7 +6,6 @@ import codecs
 import subprocess
 from datetime import datetime
 from optparse import OptionParser
-from operator import itemgetter
 
 import lib.libraries
 from lib.common import get_file_path, get_config
@@ -28,13 +25,10 @@ def get_books_status(books_list, library):
         return
 
     # Get library instance.
-    library = getattr(lib.libraries, 'n{0}'.format(library))(books=books_list)
+    library = getattr(lib.libraries, f'Library{library}')(books=books_list)
 
-    # Fetch all books status.
-    books_status = library.get_books_status()
-
-    # Sort books by deparment and section.
-    books_status.sort(key=itemgetter('department', 'section'))
+    # # Fetch all books status.
+    books_status = library.run()
 
     return books_status
 
@@ -94,10 +88,7 @@ def refresh_books_list(source, profile_id):
     ])
 
 
-def main():
-    # Fetch library data.
-    config = get_config('opac')
-
+def parse_args(config):
     # Cmd options parser
     option_parser = OptionParser()
 
@@ -115,12 +106,22 @@ def main():
         help="Choose one of {0}".format("|".join(library_choices)),
     )
 
-    (options, args) = option_parser.parse_args()
+    options, _ = option_parser.parse_args()
 
     # Check for library name.
     if not options.library:
         option_parser.print_help()
         exit(-1)
+
+    return options
+
+
+def main():
+    # Fetch library data.
+    config = get_config('opac')
+
+    # Parse arguments
+    options = parse_args(config)
 
     # Get source file for library.
     library_data = config['libraries'][options.library]

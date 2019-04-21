@@ -1,121 +1,88 @@
-# -*- coding: utf-8 -*-
-
 # Import {{{
 import re
 import json
-import socket
+from operator import itemgetter
 from lib.diskcache import diskcache, DAY
+from lib.automata import FirefoxBrowserWrapper, XvfbDisplay
 from lib.common import (
     open_url,
     get_config,
     prepare_opener,
     encode_url_params,
     get_parsed_url_response,
-    get_url_query_string,
     get_url_net_location,
     get_unverifield_ssl_handler,
-)
-from lib.automata import (
-    browser_start,
-    browser_stop,
-    set_input_value,
-    select_by_id_and_value,
-    wait_is_visible,
-    wait_is_visible_by_css,
-    wait_is_not_visible,
 )
 from selenium.common.exceptions import NoSuchElementException
 from selenium.webdriver.common.keys import Keys
 from selenium.webdriver.common.by import By
 # }}}
 
-LIBRARIES_DATA = get_config('opac')['libraries']
 
-
-class LibraryBase:  # {{{
+class LibraryScraper(XvfbDisplay, FirefoxBrowserWrapper):  # {{{
+    data = None
     handlers = []
 
-    def __init__(self, books=None):
-        self.opener = None
-        self.browser = None
-        self.books = [] if books is None else books
+    def __init__(self, books):
+        super().__init__()
+        self.books = books
+        self._uuids = None
+        self._opener = None
 
-    def get_book_uid(self, book):
-        return '{0}:{1}'.format(self.data['id'], book['isbn'])
+    @property
+    def uuids(self):
+        if not self._uuids:
+            self._uuids = {book["isbn"]: f'{self.data["id"]}:{book["isbn"]}'
+                           for book in self.books}
+        return self._uuids
 
-    def pre_process(self):
-        pass
+    @property
+    def opener(self):
+        if not self._opener:
+            self._opener = prepare_opener(self.data['url'],
+                                          handlers=self.handlers)
+        return self._opener
 
-    def post_process(self):
-        pass
+    def run(self):
+        with self.display, self.browser:
+            # Open library page.
+            self.browser.get(self.data['url'])
+            # Check if correct library page is opened.
+            self.check_library_title()
+            # Fetch all books status.
+            books_status = self.get_books_status()
 
-    def init_browser(self):
-        # Request used to initialize opener.
-        self.opener = prepare_opener(self.data['url'], handlers=self.handlers)
+        # Sort books by deparment and section.
+        books_status.sort(key=itemgetter('department', 'section'))
 
-        # Get redirect url from site response
-        redirect_url = open_url(self.data['url'], self.opener).geturl()
+        return books_status
 
-        # Get base url from redirect.
-        self.net_location = get_url_net_location(redirect_url)
-
-        # Get query params from redirect.
-        self.query_string = get_url_query_string(redirect_url)
-
-        # Try to load browser.
-        self.retry_load_browser()
-
-    def retry_load_browser(self):
-        retry_start = 2
-        while not self.browser and retry_start:
-            try:
-                self.browser = browser_start()
-                self.browser.get(self.data['url'])
-                if 'title' in self.data and self.data['title']:
-                    assert self.data['title'] in self.browser.title
-            except socket.timeout:
-                print('Browser start timed out.')
-                browser_stop(self.browser)
-                retry_start -= 1
-                if retry_start:
-                    print('Retry starting browser')
-                else:
-                    print(u"Browser start failed.")
-                    raise
-
-    def stop_browser(self):
-        # Quit browser.
-        if self.browser:
-            browser_stop(self.browser)
-
-    def get_next_search_field(self, index):
-        return self.search_fields[index]
+    def check_library_title(self):
+        if 'title' in self.data and self.data['title']:
+            assert self.data['title'] in self.browser.title
 
     def get_books_status(self):
-        self.init_browser()
-
+        # Allows to cache library info for given time.
         cached_book_info_wrapper = self.cached_book_info_wrapper()
 
-        # Will contain books info.
         books_status = {}
         for book in self.books:
-            # Skip if book was already fetched
-            book_uid = self.get_book_uid(book)
+            # Check if wasn't already processed.
+            book_uid = self.uuids[book["isbn"]]
             if book_uid in books_status:
                 continue
             # Fetch book info
             book_json = cached_book_info_wrapper(book_uid)
             # Don't append empty info.
-            if not book_json:
-                continue
-            books_status[book_uid] = json.loads(book_json)
+            if book_json:
+                books_status[book_uid] = json.loads(book_json)
 
-        self.stop_browser()
-
-        return [book for entry in books_status.values() for book in entry]
+        return [status for entry in books_status.values() for status in entry]
 
     def cached_book_info_wrapper(self):
-        books_by_uid = {self.get_book_uid(book): book for book in self.books}
+        # Use book uuid as cache key.
+        books_by_uid = {self.uuids[book["isbn"]]: book for book in self.books}
+        # Cache book fetch status for 24h.
         @diskcache(DAY)
         def get_cached_book_info(book_uid):
             return self.get_book_info(books_by_uid[book_uid])
@@ -123,86 +90,72 @@ class LibraryBase:  # {{{
 
     def get_book_info(self, book):
         book_info = None
-        field_idx = 0
-
-        # Retry fetching book info (title vs isbn).
-        search_fields_len = len(self.search_fields)
-        while not book_info and field_idx < search_fields_len:
-            # Start browser if required.
-            self.retry_load_browser()
-            # Check if browser actually started - can't continue without it.
-            if not self.browser:
-                break
-
+        # Search fields are used to retry fetching book info.
+        search_fields = self.search_fields[:]
+        while not book_info and search_fields:
             # Search first by isbn, then by title.
-            search_field = self.get_next_search_field(field_idx)
+            search_field = search_fields.pop(0)
 
-            # Try fetching book info.
-            try:
-                # Fetch book info.
-                self.pre_process()
-                book_info = self.query_book_info(book, search_field)
-                self.post_process()
-            except socket.timeout:
-                print('Querying book info timed out.')
-                browser_stop(self.browser)
-                # Remove object.
-                self.browser = None
-                # Retry fetching book with same params and a new browser.
-                if not book_info:
-                    continue
-            finally:
-                # Is called when except does 'continue'
-                field_idx += 1
+            # Fetch book info.
+            book_info, is_unavailable = self.query_book_info(book, search_field)
 
-            # None - book wasn't found, search by other criteria
-            # []   - book was found but is unavailable, end search
-            is_unavailable = book_info is not None and not book_info
-
-            # Book has been successfully queried or is not for rent.
-            if book_info:
-                print(f'Successfully queried "{book["title"]}"'
-                      f' by "{book["author"]}" info.')
-                # Return info in json format.
-                book_info = json.dumps([{
-                    'author': book['author'],
-                    'title': '"{0}"'.format(book['title']),
-                    'department': entry[0],
-                    'section': entry[1],
-                    'pages': book['pages'],
-                    'link': book['url'],
-                } for entry in book_info])
+            # Book was found as available or unavailable.
+            if book_info or is_unavailable:
                 break
-            # If book is unavailable then don't search for it a second time.
-            elif is_unavailable:
-                print(f'Book "{book["title"]}" by "{book["author"]}"'
-                      f' not available.')
-                book_info = None
-                break
-
-            # Print next loop info.
-            print('Retry book fetching.' if field_idx < search_fields_len else 'Book not found.')
+            elif search_fields:
+                print('Retry book fetching.')
+            else:
+                print(f'Book "{book["title"]}" by {book["author"]} not found.')
 
         return book_info
 
     def query_book_info(self, book, search_field):
         # Query book and fetch results.
-        results = self.query_book(book, search_field)
-        match = self.get_matching_result(book, search_field, results)
-        info = self.extract_book_info(book, match)
+        query_results = self.query_book(book, search_field)
+        query_match = self.get_matching_result(book, search_field, query_results)
+        book_info = self.extract_book_info(book, query_match)
 
-        return info
+        return self.process_book_info(book, book_info)
 
-    def find_by_css(self, selector):
-        return self.browser.find_element_by_css_selector(selector)
+    def process_book_info(self, book, book_info):
+        # Book info:
+        # None - book wasn't found, search by other criteria
+        # []   - book was found but is unavailable, end search
+        is_unavailable = book_info is not None and not book_info
 
-    def find_all_by_css(self, selector):
-        return self.browser.find_elements_by_css_selector(selector)
+        # Book has been successfully queried or is not for rent.
+        if book_info:
+            print(f'Successfully queried "{book["title"]}"'
+                  f' by {book["author"]} info.')
+            # Return info in json format.
+            book_info = json.dumps([{
+                "author": book["author"],
+                "title": f'"{book["title"]}"',
+                "department": entry[0],
+                "section": entry[1],
+                "pages": book["pages"],
+                "link": book["url"],
+            } for entry in book_info])
+        # If book is unavailable then don't search for it a second time.
+        elif is_unavailable:
+            print(f'Book "{book["title"]}" by {book["author"]} not available.')
+            book_info = None
+
+        return book_info, is_unavailable
+
+    def query_book(self, book, search_field):
+        raise NotImplementedError()
+
+    def get_matching_result(self, book, search_field):
+        raise NotImplementedError()
+
+    def extract_book_info(self, book, search_field):
+        raise NotImplementedError()
 # }}}
 
 
-class n4949(LibraryBase):  # {{{
-    data = LIBRARIES_DATA['4949']
+class Library4949(LibraryScraper):  # {{{
+    data = get_config("opac")["libraries"]["4949"]
 
     search_fields = ['isbn', 'title']
 
@@ -213,16 +166,22 @@ class n4949(LibraryBase):  # {{{
     resource_type_id = 'form1:dropdown4'
     clear_button_id = 'form1:btnCzyscForme'
 
-    # Search type:
-    # 1 - Author
-    # 2 - Title
-    # 3 - ISBN
-    # 4 - Series
-    # Resource type:
-    # 1  - All
-    # 2  - Book
-    # 9  - Magazine
-    # 15 - Audiobook
+    def __init__(self, books):
+        super().__init__(books)
+        self._net_location = None
+
+    @property
+    def net_location(self):
+        if not self._net_location:
+            # Get base url from redirect.
+            self._net_location = get_url_net_location(
+                # Get redirect url from site response
+                open_url(self.data["url"], self.opener).geturl()
+            )
+        return self._net_location
+
+    # Search type: 1 - Author, 2 - Title, 3 - ISBN, 4 - Series
+    # Resource type: 1  - All, 2  - Book, 9  - Magazine, 15 - Audiobook
     def query_book(self, book, search_field):
         if not(search_field in book and book[search_field]):
             return
@@ -241,17 +200,17 @@ class n4949(LibraryBase):  # {{{
             break
 
         # Clear form before using.
-        if (wait_is_visible(self.browser, self.clear_button_id)):
+        if (self.wait_is_visible(self.clear_button_id)):
             clear = self.browser.find_element_by_id(self.clear_button_id)
             clear.click()
 
         return
 
     def hide_autocomplete_popup(self, text_field_id, autocomp_popup_id):
-        if (wait_is_visible(self.browser, autocomp_popup_id)):
+        if (self.wait_is_visible(autocomp_popup_id)):
             text_field = self.browser.find_element_by_id(text_field_id)
             text_field.send_keys(Keys.ESCAPE)
-            wait_is_not_visible(self.browser, autocomp_popup_id)
+            self.wait_is_not_visible(autocomp_popup_id)
 
     def query_book_by_isbn(self, book):
         search_type = '3'
@@ -263,25 +222,25 @@ class n4949(LibraryBase):  # {{{
         self.select_form('Indeks')
 
         # Input search value.
-        set_input_value(self.browser, 'form1:textField1', book['isbn'])
+        self.set_input_value('form1:textField1', book['isbn'])
 
         # Hide autocomplete popup.
         self.hide_autocomplete_popup('form1:textField1', 'autoc1')
 
         # Set search type.
-        select_by_id_and_value(self.browser, self.search_type_id, search_type)
+        self.select_by_id_and_value(self.search_type_id, search_type)
 
         # Set resource_type.
-        select_by_id_and_value(self.browser, self.resource_type_id, resource_type)
+        self.select_by_id_and_value(self.resource_type_id, resource_type)
 
         # Submit form.
         results = None
-        if (wait_is_visible(self.browser, submit_button_id)):
+        if (self.wait_is_visible(submit_button_id)):
             submit = self.browser.find_element_by_id(submit_button_id)
             submit.click()
 
             # Wait for results to appear.
-            if (wait_is_visible(self.browser, results_list_xpath, By.XPATH)):
+            if (self.wait_is_visible(results_list_xpath, By.XPATH)):
                 results_wrapper = self.browser.find_element_by_xpath(
                     results_list_xpath
                 )
@@ -303,24 +262,24 @@ class n4949(LibraryBase):  # {{{
             author_name_list.pop(),
             ' '.join(author_name_list)
         )
-        set_input_value(self.browser, 'form1:textField1', author_string)
+        self.set_input_value('form1:textField1', author_string)
         # Hide autocomplete popup.
         self.hide_autocomplete_popup('form1:textField1', 'autoc1')
 
         # Input book title.
-        set_input_value(self.browser, 'form1:textField2', book['title'])
+        self.set_input_value('form1:textField2', book['title'])
         # Hide autocomplete popup.
         self.hide_autocomplete_popup('form1:textField2', 'autoc2')
 
         # Set resource_type.
-        select_by_id_and_value(self.browser, self.resource_type_id, resource_type)
+        self.select_by_id_and_value(self.resource_type_id, resource_type)
 
         results = None
-        if (wait_is_visible(self.browser, submit_button_id)):
+        if (self.wait_is_visible(submit_button_id)):
             submit = self.browser.find_element_by_id(submit_button_id)
             submit.click()
 
-            if (wait_is_visible(self.browser, 'opisy')):
+            if (self.wait_is_visible('opisy')):
                 results = self.browser.find_elements_by_class_name('opis')
 
         # Return search results.
@@ -430,9 +389,8 @@ class n4949(LibraryBase):  # {{{
 # }}}
 
 
-class n5004(LibraryBase):  # {{{
-    data = LIBRARIES_DATA['5004']
-
+class Library5004(LibraryScraper):  # {{{
+    data = get_config("opac")["libraries"]["5004"]
     search_fields = ['title_and_author']
 
     handlers = [get_unverifield_ssl_handler()]
@@ -445,30 +403,33 @@ class n5004(LibraryBase):  # {{{
     item_signature_re = re.compile('dl-horizontal')
     item_available_re = re.compile('Dostępny')
 
-    def pre_process(self):
+    def get_book_info(self, book):
         # Wait for submit button to be visible.
         try:
-            wait_is_visible_by_css(self.browser, self.search_button)
+            self.wait_is_visible_by_css(self.search_button)
         except NoSuchElementException:
             pass
 
-    def post_process(self):
+        book_info = super().get_book_info(book)
+
+        # Reopen search form page.
         try:
             button = self.browser.find_element_by_class_name('library_title-pages')
-            link = button.find_element_by_tag_name('a')
-            link.click()
+            button.find_element_by_tag_name('a').click()
         except NoSuchElementException:
             pass
+
+        return book_info
 
     def set_search_value(self, search_value):
         # Input search value.
-        if wait_is_visible_by_css(self.browser, self.search_input):
+        if self.wait_is_visible_by_css(self.search_input):
             self.find_by_css(self.search_input).send_keys(search_value)
             return True
         return False
 
     def query_book(self, book, search_field):
-        # Search field didn't load properly - can't run query.
+        # Search field didn't load - can't run query.
         search_value = '"{0}" AND "{1}"'.format(book['title'], book['author'])
         if not self.set_search_value(search_value):
             return None
@@ -477,16 +438,16 @@ class n5004(LibraryBase):  # {{{
         self.find_by_css(self.search_button).click()
 
         # Wait for results to load.
-        wait_is_visible_by_css(self.browser, self.results_header)
+        self.wait_is_visible_by_css(self.results_header)
 
         results = None
         try:
             self.find_by_css('.info-empty')
         except NoSuchElementException:
             # Display up to 100 results on page.
-            if wait_is_visible_by_css(self.browser, '.btn-group>.hidden-xs'):
+            if self.wait_is_visible_by_css('.btn-group>.hidden-xs'):
                 self.find_by_css('.btn-group>.hidden-xs').click()
-                if wait_is_visible_by_css(self.browser, '.btn-group.open>.dropdown-menu'):
+                if self.wait_is_visible_by_css('.btn-group.open>.dropdown-menu'):
                     self.find_by_css('.btn-group.open>.dropdown-menu>li:last-child').click()
             results = self.find_all_by_css('dl.dl-horizontal')
         return results

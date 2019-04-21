@@ -1,5 +1,3 @@
-# -*- coding: utf-8 -*-
-
 # Import {{{
 import re
 from openpyxl import Workbook, load_workbook
@@ -59,17 +57,17 @@ def make_xls(file_name, worksheet_name, worksheet_headers, entries):
         column_dimensions.width = column_widths[index]
 
     # Write workbook.
-    workbook_path = get_file_path('{0}.xls'.format(file_name))
+    workbook_path = get_file_path('var', f'{file_name}.xlsx')
     workbook.save(workbook_path)
 
 
-def open_workbook(file_name):
+def open_workbook(*file_name):
     if not file_name:
         return None, 'Please provide a correct xls file.'
 
     workbook, error = None, None
     try:
-        workbook_path = get_file_path(file_name)
+        workbook_path = get_file_path(*file_name)
         workbook = load_workbook(workbook_path)
     except (IOError, InvalidFileException) as e:
         message = e.strerror if hasattr(e, 'strerror') else e.message
@@ -78,6 +76,6 @@ def open_workbook(file_name):
     return workbook, error
 
 
-def save_workbook(workbook, file_name):
-    workbook_path = get_file_path(file_name)
+def save_workbook(workbook, *file_name):
+    workbook_path = get_file_path(*file_name)
     workbook.save(workbook_path)
