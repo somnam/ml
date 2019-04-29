@@ -48,7 +48,8 @@ class SQLiteConnector:
 
     @classmethod
     def instance(cls, db_name, file_name):
-        cls.__instance = (cls.__instance or cls(db_name, file_name))
+        if not cls.__instance:
+            cls.__instance = cls(db_name, file_name)
         return cls.__instance
 
     def __init__(self, db_name, file_name):
