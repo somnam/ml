@@ -1,0 +1,10 @@
+pip-tools
+beautifulsoup4
+fuzzywuzzy
+lxml
+oauth2client
+gspread
+openpyxl
+python-Levenshtein
+selenium
+xvfbwrapper

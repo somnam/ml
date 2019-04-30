@@ -11,6 +11,6 @@
 *.db
 
 # Environment
-bin/
+geckodriver
 tags
 .python-version
