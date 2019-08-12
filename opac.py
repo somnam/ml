@@ -17,7 +17,8 @@ from lib.xls import make_xls
 # }}}
 
 # Lovely constants.
-WORKSHEET_HEADERS = ('author', 'title', 'department', 'section', 'pages', 'link')
+WORKSHEET_HEADERS = ('author', 'title', 'department', 'section', 'pages',
+                     'link')
 
 
 def get_books_status(books_list, library):
@@ -52,7 +53,10 @@ def get_books_list(file_name):
     return books_list
 
 
-def write_books_to_google_docs(auth_data, shelf_name, workbook_title, books_status):
+def write_books_to_google_docs(auth_data,
+                               shelf_name,
+                               workbook_title,
+                               books_status):
     # Fetch google_docs client.
     print("Authenticating to Google service.")
     client = get_service_client(auth_data)
@@ -76,7 +80,8 @@ def write_books_to_xls(shelf_name, books_status):
 
 
 def get_books_source_file(source):
-    return source if re.match(r'^.*\.json$', source) else 'imogeen_%s.json' % (source)
+    return (source if re.match(r'^.*\.json$', source)
+            else 'imogeen_%s.json' % (source))
 
 
 def refresh_books_list(source, profile_id):

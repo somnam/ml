@@ -7,7 +7,6 @@
 beautifulsoup4==4.7.1
 certifi==2019.6.16        # via requests
 chardet==3.0.4            # via requests
-click==7.0                # via pip-tools
 et-xmlfile==1.0.1         # via openpyxl
 fuzzywuzzy==0.17.0
 gspread==3.1.0
@@ -17,18 +16,16 @@ jdcal==1.4.1              # via openpyxl
 lxml==4.3.4
 oauth2client==4.1.3
 openpyxl==2.6.2
-pip-tools==3.8.0
 pyasn1-modules==0.2.5     # via oauth2client
 pyasn1==0.4.5             # via oauth2client, pyasn1-modules, rsa
 python-levenshtein==0.12.0
-requests==2.22.0          # via gspread
+requests==2.22.0
 rsa==4.0                  # via oauth2client
 selenium==3.141.0
-six==1.12.0               # via oauth2client, pip-tools
+six==1.12.0               # via oauth2client
 soupsieve==1.9.2          # via beautifulsoup4
 urllib3==1.25.3           # via requests, selenium
 xvfbwrapper==0.2.9
 
 # The following packages are considered to be unsafe in a requirements file:
-# pip==19.1.1
 # setuptools==41.0.1        # via python-levenshtein

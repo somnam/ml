@@ -536,6 +536,9 @@ class Library5004(LibraryScraper):  # {{{
             data=encode_url_params(accessibility_params),
             opener=self.opener,
         )
+        if not accessibility_result:
+            return False
+
         is_book_available = self.item_available_re.search(
             accessibility_result.div.text
         )

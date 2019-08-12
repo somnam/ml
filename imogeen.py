@@ -3,12 +3,18 @@
 # Import {{{
 import re
 import json
+import logging
+import requests
+from urllib.parse import urlparse
+from json import JSONDecodeError
+from requests.exceptions import HTTPError
+from bs4 import BeautifulSoup
 from operator import itemgetter
 from multiprocessing import cpu_count
 from multiprocessing.dummy import Pool
+from selenium.common.exceptions import TimeoutException, NoSuchElementException
 from lib.diskcache import diskcache, HOUR, MONTH
-# TODO: Deprecated, use argparse instead.
-from optparse import OptionParser
+from argparse import ArgumentParser
 from lib.common import (
     get_config,
     get_file_path,
@@ -24,6 +30,12 @@ from lib.common import (
 # }}}
 
 config = get_config('imogeen')
+
+logging.basicConfig(
+    level=logging.INFO,
+    format='%(asctime)-15s %(levelname)s %(message)s'
+)
+logger = logging.getLogger()
 
 to_read_class_re = re.compile('shelf-name')
 book_original_title_re = re.compile('tytu?')
@@ -416,46 +428,130 @@ def fetch_all_shelves(profile_id, include_price):
     return
 
 
-def main():
-    # Cmd options parser
-    option_parser = OptionParser()
+def search_profile_by_name(name):
+    if not name:
+        return
 
-    # Add options
-    option_parser.add_option("-t", "--to-read", action="store_true")
-    option_parser.add_option("-o", "--owned", action="store_true")
-    option_parser.add_option("-r", "--read", action="store_true")
-    option_parser.add_option("-p", "--price", action="store_true")
-    option_parser.add_option("-s", "--shelf")
-    option_parser.add_option("-i", "--profile-id", type="int")
-
-    (options, args) = option_parser.parse_args()
-
-    if not (options.profile_id and (
-        options.to_read or
-        options.owned or
-        options.read or
-        options.shelf
-    )):
-        # Display help
-        option_parser.print_help()
-    elif options.to_read:
-        # Scan to read list
-        fetch_shelf_list(
-            options.profile_id, 'chce-przeczytac', include_price=options.price
-        )
-    elif options.read:
-        fetch_shelf_list(options.profile_id, 'przeczytane')
-    elif options.owned:
-        # Scan owned list.
-        fetch_shelf_list(options.profile_id, 'posiadam')
-    elif options.shelf:
-        # Fetch books from all shelves.
-        if options.shelf == 'all':
-            fetch_all_shelves(options.profile_id, options.price)
-        else:
-            fetch_shelf_list(
-                options.profile_id, options.shelf, include_price=options.price
+    with requests.Session() as session:
+        session.headers.update({'User-Agent': 'Mozilla/5.0 Gecko Firefox'})
+        try:
+            # Translate user name to encoded search string.
+            logger.info(f'Encoding name: "{name}"')
+            response = session.post(
+                config['lc_before_search_url'],
+                data={'phrase': name},
+                headers={'X-Requested-With': 'XMLHttpRequest'},
             )
+            response.raise_for_status()
+
+            # Parse json response.
+            response_value = response.json()
+            encoded_name = response_value['phraseEncoded']
+            logger.info(f'Got encoded name: {encoded_name}')
+
+            # Search for user using encoded name.
+            response = session.get(
+                config['lc_profile_search_url'],
+                params={'friend': encoded_name, 'main_search': 1}
+            )
+            response.raise_for_status()
+            logger.info(f'Got search results')
+        except (HTTPError, JSONDecodeError) as e:
+            logger.error(f'HTML request error: {e}')
+            return
+
+    return response.content
+
+
+def find_profile_id_in_search_results(name, search_results):
+    if not search_results:
+        return
+
+    profile_id = None
+
+    try:
+        parsed_results = BeautifulSoup(search_results, 'lxml')
+        account_list = parsed_results.find('ul', {'class': 'account-list'})
+        accounts = (account_list.find_all('li', {'class': 'account-list-item'})
+                    if account_list else [])
+        logger.info(f'Parsed search results')
+
+        # Search for name profile link in results.
+        for account in accounts:
+            account_url = account.div.a.get('href')
+            parsed_url = urlparse(account_url)
+            if not parsed_url.path:
+                continue
+            *_, profile_id, profile_name = parsed_url.path.split('/')
+            if profile_name.lower() == name.lower():
+                profile_id = int(profile_id)
+                logger.info(f'Found profile_id: {profile_id} for name: "{name}"')
+                break
+    except (TimeoutException, NoSuchElementException) as e:
+        logger.error(f'HTML parsing error: {e}')
+    finally:
+        parsed_results.decompose()
+
+    if not profile_id:
+        logger.info(f'Profile for name "{name}" not found.')
+
+    return profile_id
+
+
+def fetch_profile_id_using_name(name):
+    search_results = search_profile_by_name(name)
+    profile_id = find_profile_id_in_search_results(name, search_results)
+    return profile_id
+
+
+def fetch_profile_id_from_args(args):
+    return (args.profile_id
+            if args.profile_id
+            else fetch_profile_id_using_name(args.name))
+
+
+def parse_args():
+    args_parser = ArgumentParser(description='Fetch books from profile shelf')
+
+    # One of 'profile_id' and 'name' is required.
+    args_group = args_parser.add_mutually_exclusive_group(required=True)
+    args_group.add_argument('-i', '--profile_id',
+                            nargs='?',
+                            type=int,
+                            help='Profile id')
+    args_group.add_argument('-n', '--name',
+                            nargs='?',
+                            type=str,
+                            help='Profile name')
+
+    args_parser.add_argument('-s', '--shelf',
+                             required=True,
+                             help='Shelf name to search')
+    args_parser.add_argument('-p', '--price',
+                             action='store_true',
+                             help='Append price to books')
+
+    args = args_parser.parse_args()
+
+    return args
+
+
+def main():
+    args = parse_args()
+
+    logger.info(f'Given arguments: {args}')
+
+    # Fetch profile id if not given in input
+    profile_id = fetch_profile_id_from_args(args)
+    if not profile_id:
+        logger.warning('Unable to continue without profile id.')
+        return
+
+    # Fetch books from all shelves.
+    if args.shelf == 'all':
+        fetch_all_shelves(profile_id, args.price)
+    else:
+        fetch_shelf_list(profile_id, args.shelf, args.price)
 
 
 if __name__ == "__main__":

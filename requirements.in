@@ -1,7 +1,6 @@
-pip
-pip-tools
 beautifulsoup4
 fuzzywuzzy
+requests
 lxml
 oauth2client
 gspread
