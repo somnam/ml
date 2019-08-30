@@ -22,6 +22,7 @@ from selenium.webdriver.common.by import By
 class LibraryScraper(XvfbDisplay, FirefoxBrowserWrapper):  # {{{
     data = None
     handlers = []
+    headers = None
 
     def __init__(self, books):
         super().__init__()
@@ -40,7 +41,8 @@ class LibraryScraper(XvfbDisplay, FirefoxBrowserWrapper):  # {{{
     def opener(self):
         if not self._opener:
             self._opener = prepare_opener(self.data['url'],
-                                          handlers=self.handlers)
+                                          handlers=self.handlers,
+                                          headers=self.headers)
         return self._opener
 
     def run(self):
@@ -82,6 +84,7 @@ class LibraryScraper(XvfbDisplay, FirefoxBrowserWrapper):  # {{{
     def cached_book_info_wrapper(self):
         # Use book uuid as cache key.
         books_by_uid = {self.uuids[book["isbn"]]: book for book in self.books}
+
         # Cache book fetch status for 24h.
         @diskcache(DAY)
         def get_cached_book_info(book_uid):
@@ -394,6 +397,7 @@ class Library5004(LibraryScraper):  # {{{
     search_fields = ['title_and_author']
 
     handlers = [get_unverifield_ssl_handler()]
+    headers = {'X-Requested-With': 'XMLHttpRequest'}
 
     search_input = '#SimpleSearchForm_q'
     search_button = '.btn.search-main-btn'
@@ -401,7 +405,6 @@ class Library5004(LibraryScraper):  # {{{
 
     items_list_re = re.compile('prolibitem')
     item_signature_re = re.compile('dl-horizontal')
-    item_available_re = re.compile('Dostępny')
 
     def get_book_info(self, book):
         # Wait for submit button to be visible.
@@ -503,7 +506,7 @@ class Library5004(LibraryScraper):  # {{{
             if not item_signatures:
                 continue
 
-            signature_values = item_signatures[-1].text.split()
+            signature_values = item_signatures[1].text.split()
             # Skip books without section name.
             if len(signature_values) < 2:
                 continue
@@ -521,12 +524,14 @@ class Library5004(LibraryScraper):  # {{{
         return book_info
 
     def get_book_accessibility(self, yii_token, result):
-        accessibility_url = '{0}/ajax/getaccessibilityicon'.format(
+        accessibility_url = '{0}/itemrequest/getiteminfomessage'.format(
             self.data['base_url']
         )
         accessibility_params = {
             "docid": result.get('data-item-id'),
             "doclibid": result.get('data-item-lib-id'),
+            'locationid': result.get('data-item-location-id'),
+            'accessibility': 1,
             "YII_CSRF_TOKEN": yii_token,
         }
         accessibility_params['libid'] = accessibility_params['doclibid']
@@ -536,9 +541,12 @@ class Library5004(LibraryScraper):  # {{{
             data=encode_url_params(accessibility_params),
             opener=self.opener,
         )
-        is_book_available = self.item_available_re.search(
-            accessibility_result.div.text
-        )
+        if not accessibility_result:
+            return False
+
+        accessibility_value = json.loads(accessibility_result.html.body.p.text)
+        is_book_available = (self.data['accepted_status']
+                             in accessibility_value['message'])
         accessibility_result.decompose()
 
         return True if is_book_available else False

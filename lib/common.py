@@ -142,12 +142,12 @@ def parse_url_response(response, verbose=True):
     return parser
 
 
-def get_parsed_url_response(url, data=None, opener=None, verbose=True):
+def get_parsed_url_response(url, data=None, opener=None, headers=None, verbose=True):
     """Send request to given url and return parsed HTML response."""
 
     # Fetch url response object
     return parse_url_response(
-        get_url_response(url, data=data, opener=opener, verbose=verbose),
+        get_url_response(url, headers=headers, data=data, opener=opener, verbose=verbose),
         verbose=verbose
     )
 
