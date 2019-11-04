@@ -9,8 +9,8 @@
 *.cache
 *.log
 *.db
+*.ini
 
 # Environment
 geckodriver
 tags
-.python-version

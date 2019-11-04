@@ -1,11 +1,10 @@
-pip
-pip-tools
 beautifulsoup4
-fuzzywuzzy
+requests
 lxml
 oauth2client
 gspread
 openpyxl
+progress
 python-Levenshtein
 selenium
 xvfbwrapper
