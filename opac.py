@@ -8,7 +8,8 @@ from datetime import datetime
 from optparse import OptionParser
 
 import lib.libraries
-from lib.common import get_file_path, get_config
+from lib.config import Config
+from lib.common import get_file_path
 from lib.gdocs import (
     get_service_client,
     write_rows_to_worksheet,
@@ -91,7 +92,7 @@ def refresh_books_list(books_source, profile_name):
     ])
 
 
-def parse_args(config):
+def parse_args(library_choices):
     # Cmd options parser
     option_parser = OptionParser()
 
@@ -100,7 +101,6 @@ def parse_args(config):
     option_parser.add_option("-a", "--auth-data")
 
     # Add library option.
-    library_choices = [*config['libraries']]
     option_parser.add_option(
         "-l",
         "--library",
@@ -121,15 +121,14 @@ def parse_args(config):
 
 def main():
     # Fetch library data.
-    config = get_config('opac')
+    config = Config()['opac']
 
     # Parse arguments
-    options = parse_args(config)
+    options = parse_args(config.getstruct('libraries'))
 
     # Get source file for library.
     profile_name = config['profile_name']
-    library_data = config['libraries'][options.library]
-    books_source = library_data['source']
+    books_source = Config()[f'libraries:{options.library}']['source']
 
     if options.refresh:
         print('Updating list of books from source "%s".' % books_source)

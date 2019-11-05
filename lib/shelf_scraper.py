@@ -10,7 +10,7 @@ from multiprocessing.dummy import Pool
 from selenium.common.exceptions import TimeoutException, NoSuchElementException
 from lib.diskcache import diskcache, MONTH
 from lib.utils import bs4_scope
-from lib.common import get_config
+from lib.config import Config
 
 
 class LoginError(Exception):
@@ -37,7 +37,7 @@ class ShelfScraper:
         self.shelf_name = shelf_name
         self.include_price = include_price
 
-        self.config = get_config('shelf_scraper')
+        self.config = Config()['shelf_scraper']
 
         self.profile_id = None
         self.shelves = None
@@ -371,10 +371,11 @@ class ShelfScraper:
                    else price_info['data'])
 
         book_price = 0.0
+        retailer_choices = self.config.getstruct('retailers')
         for entry in entries:
             has_retailer_price = (
                 entry.get('type', '') == 'book'
-                and entry.get('name', '') in self.config['retailers']
+                and entry.get('name', '') in retailer_choices
             )
             if not has_retailer_price:
                 continue

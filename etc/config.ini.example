@@ -1,3 +1,36 @@
+[shelf_scraper]
+lc_url = https://lubimyczytac.pl
+lc_login_url = https://lubimyczytac.pl/zaloguj/c
+lc_profile_search_url = https://lubimyczytac.pl/account/getMoreSearchedAccountsNoSSL
+lc_profile_url = https://lubimyczytac.pl/profil
+lc_shelf_page_url = https://lubimyczytac.pl/profile/getLibraryBooksList
+bb_url = https://widget.getbuybox.com/v3/1/buybox.json
+retailers = []
+
+[opac]
+profile_id = profile id
+profile_name = profile name
+workbook_title = workbook title
+libraries = ["4949", "5004"]
+
+[libraries:4949]
+id = 4949
+url = http://185.43.138.133:8080/Opac4/
+book_url_suffix = Opac4/faces/Opis.jsp?ido=
+title = Opac
+source = shelf name
+accepted_locations = []
+
+[libraries:5004]
+id = 5004
+url = https://katalog.rajska.info/catalog
+base_url = https://katalog.rajska.info
+title = Prolib Integro
+source = shelf name
+department = department name
+accepted_locations = []
+accepted_status = accepted status
+
 [loggers]
 keys = root, script
 
