@@ -8,7 +8,8 @@ from datetime import datetime
 from optparse import OptionParser
 
 import lib.libraries
-from lib.common import get_file_path, get_config
+from lib.config import Config
+from lib.common import get_file_path
 from lib.gdocs import (
     get_service_client,
     write_rows_to_worksheet,
@@ -35,8 +36,7 @@ def get_books_status(books_list, library):
 
 
 def get_worksheet_name(shelf_name):
-    return '{0} {1}'.format(shelf_name.capitalize().replace('-', ' '),
-                            get_today_date())
+    return '{0} {1}'.format(shelf_name, get_today_date())
 
 
 def get_today_date():
@@ -79,21 +79,24 @@ def write_books_to_xls(shelf_name, books_status):
                     books_status)
 
 
-def get_books_source_file(source):
-    return (source if re.match(r'^.*\.json$', source)
-            else 'imogeen_%s.json' % (source))
+def get_books_source_file(source, profile_name=''):
+    if re.match(r'^.*\.json$', source):
+        return source
+
+    source_file = re.sub(r'\s+', '_', source.lower())
+    return f'{profile_name}_{source_file}.json'
 
 
-def refresh_books_list(source, profile_id):
+def refresh_books_list(books_source, profile_name):
     return subprocess.call([
         sys.executable,
-        '-tt', get_file_path('imogeen.py'),
-        '-s',  source,      # noqa
-        '-i',  profile_id,  # noqa
+        '-tt', get_file_path('shelf_scraper.py'),
+        '--shelf-name', books_source,
+        '--profile-name', profile_name,
     ])
 
 
-def parse_args(config):
+def parse_args(library_choices):
     # Cmd options parser
     option_parser = OptionParser()
 
@@ -102,7 +105,6 @@ def parse_args(config):
     option_parser.add_option("-a", "--auth-data")
 
     # Add library option.
-    library_choices = [*config['libraries']]
     option_parser.add_option(
         "-l",
         "--library",
@@ -123,20 +125,20 @@ def parse_args(config):
 
 def main():
     # Fetch library data.
-    config = get_config('opac')
+    config = Config()['opac']
 
     # Parse arguments
-    options = parse_args(config)
+    options = parse_args(config.getstruct('libraries'))
 
     # Get source file for library.
-    library_data = config['libraries'][options.library]
-    books_source = library_data['source']
+    profile_name = config['profile_name']
+    books_source = Config()[f'libraries:{options.library}']['source']
 
     if options.refresh:
         print('Updating list of books from source "%s".' % books_source)
-        refresh_books_list(books_source, config['profile_id'])
+        refresh_books_list(books_source, profile_name)
 
-    books_source_file = get_books_source_file(books_source)
+    books_source_file = get_books_source_file(books_source, profile_name)
 
     # Read in books list.
     print('Reading in books list.')
@@ -158,7 +160,7 @@ def main():
                                    config['workbook_title'],
                                    books_status)
     else:
-        write_books_to_xls(books_source, books_status)
+        write_books_to_xls(books_source_file, books_status)
 
 
 if __name__ == "__main__":

@@ -4,9 +4,9 @@ import json
 from operator import itemgetter
 from lib.diskcache import diskcache, DAY
 from lib.automata import FirefoxBrowserWrapper, XvfbDisplay
+from lib.config import Config
 from lib.common import (
     open_url,
-    get_config,
     prepare_opener,
     encode_url_params,
     get_parsed_url_response,
@@ -20,7 +20,7 @@ from selenium.webdriver.common.by import By
 
 
 class LibraryScraper(XvfbDisplay, FirefoxBrowserWrapper):  # {{{
-    data = None
+    config = None
     handlers = []
     headers = None
 
@@ -33,14 +33,14 @@ class LibraryScraper(XvfbDisplay, FirefoxBrowserWrapper):  # {{{
     @property
     def uuids(self):
         if not self._uuids:
-            self._uuids = {book["isbn"]: f'{self.data["id"]}:{book["isbn"]}'
+            self._uuids = {book["isbn"]: f'{self.config["id"]}:{book["isbn"]}'
                            for book in self.books}
         return self._uuids
 
     @property
     def opener(self):
         if not self._opener:
-            self._opener = prepare_opener(self.data['url'],
+            self._opener = prepare_opener(self.config['url'],
                                           handlers=self.handlers,
                                           headers=self.headers)
         return self._opener
@@ -48,7 +48,7 @@ class LibraryScraper(XvfbDisplay, FirefoxBrowserWrapper):  # {{{
     def run(self):
         with self.display, self.browser:
             # Open library page.
-            self.browser.get(self.data['url'])
+            self.browser.get(self.config['url'])
             # Check if correct library page is opened.
             self.check_library_title()
             # Fetch all books status.
@@ -60,8 +60,8 @@ class LibraryScraper(XvfbDisplay, FirefoxBrowserWrapper):  # {{{
         return books_status
 
     def check_library_title(self):
-        if 'title' in self.data and self.data['title']:
-            assert self.data['title'] in self.browser.title
+        if 'title' in self.config and self.config['title']:
+            assert self.config['title'] in self.browser.title
 
     def get_books_status(self):
         # Allows to cache library info for given time.
@@ -158,7 +158,7 @@ class LibraryScraper(XvfbDisplay, FirefoxBrowserWrapper):  # {{{
 
 
 class Library4949(LibraryScraper):  # {{{
-    data = get_config("opac")["libraries"]["4949"]
+    config = Config()['libraries:4949']
 
     search_fields = ['isbn', 'title']
 
@@ -179,7 +179,7 @@ class Library4949(LibraryScraper):  # {{{
             # Get base url from redirect.
             self._net_location = get_url_net_location(
                 # Get redirect url from site response
-                open_url(self.data["url"], self.opener).geturl()
+                open_url(self.config["url"], self.opener).geturl()
             )
         return self._net_location
 
@@ -317,7 +317,7 @@ class Library4949(LibraryScraper):  # {{{
             book_id = elem.get_attribute('id').replace('dvop', '')
             matching.append('{0}{1}{2}'.format(
                 self.net_location,
-                self.data['book_url_suffix'],
+                self.config['book_url_suffix'],
                 book_id
             ))
 
@@ -361,7 +361,7 @@ class Library4949(LibraryScraper):  # {{{
                     address = (location[0] if location else None)
 
                 # Check if address is in accepted list.
-                if address not in self.data['accepted_locations']:
+                if address not in self.config.getstruct('accepted_locations'):
                     continue
 
                 # Check if book is rented/not available.
@@ -393,7 +393,7 @@ class Library4949(LibraryScraper):  # {{{
 
 
 class Library5004(LibraryScraper):  # {{{
-    data = get_config("opac")["libraries"]["5004"]
+    config = Config()['libraries:5004']
     search_fields = ['title_and_author']
 
     handlers = [get_unverifield_ssl_handler()]
@@ -513,11 +513,11 @@ class Library5004(LibraryScraper):  # {{{
 
             # Check if address is in accepted list.
             location = signature_values[0]
-            if location not in self.data['accepted_locations']:
+            if location not in self.config.getstruct('accepted_locations'):
                 continue
             # Get full section name.
             section = ' '.join(signature_values[1:])
-            book_info = (self.data['department'], section)
+            book_info = (self.config['department'], section)
 
             # All remaining available books will be in the same section.
             break
@@ -525,7 +525,7 @@ class Library5004(LibraryScraper):  # {{{
 
     def get_book_accessibility(self, yii_token, result):
         accessibility_url = '{0}/itemrequest/getiteminfomessage'.format(
-            self.data['base_url']
+            self.config['base_url']
         )
         accessibility_params = {
             "docid": result.get('data-item-id'),
@@ -545,7 +545,7 @@ class Library5004(LibraryScraper):  # {{{
             return False
 
         accessibility_value = json.loads(accessibility_result.html.body.p.text)
-        is_book_available = (self.data['accepted_status']
+        is_book_available = (self.config['accepted_status']
                              in accessibility_value['message'])
         accessibility_result.decompose()
 
