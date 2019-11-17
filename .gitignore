@@ -10,6 +10,8 @@
 *.log
 *.db
 *.ini
+*.jar
+*.pid
 
 # Environment
 geckodriver

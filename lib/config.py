@@ -25,5 +25,8 @@ class Config:
             decoded_value = None
         return decoded_value
 
+    def __contains__(self, section):
+        return section in self.config
+
     def __getitem__(self, section):
         return self.config[section] if section in self.config else None

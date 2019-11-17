@@ -1,6 +1,6 @@
 # Import {{{
-from lib.common import get_file_path, remove_file
-from xvfbwrapper import Xvfb
+import urllib3
+from lib.config import Config
 from selenium import webdriver
 from selenium.common.exceptions import TimeoutException, NoSuchElementException
 from selenium.webdriver.common.by import By
@@ -9,11 +9,11 @@ from selenium.webdriver.support.ui import Select, WebDriverWait
 # }}}
 
 
-class BrowserWrapper:  # {{{
-    def __init__(self):
-        super().__init__()
-        self._browser = None
+class BrowserUnavailable(Exception):
+    pass
 
+
+class BrowserWrapper:  # {{{
     @property
     def browser(self):
         raise NotImplementedError()
@@ -50,7 +50,7 @@ class BrowserWrapper:  # {{{
             return False
 
     def set_input_value(self, locator, value, using=By.ID):
-        if (self.wait_is_visible(locator, using)):
+        if self.wait_is_visible(locator, using):
             field = self.browser.find_element(by=using, value=locator)
             field.send_keys(value)
 
@@ -68,40 +68,35 @@ class BrowserWrapper:  # {{{
 
 
 class FirefoxBrowserWrapper(BrowserWrapper):  # {{{
-    log_path = get_file_path('var/log/geckodriver.log')
+    @property
+    def options(self):
+        if not hasattr(self, '_options'):
+            # Customize Firefox instance.
+            options = webdriver.FirefoxOptions()
+            # Run in headless mode.
+            options.headless = True
+            # Create custom profile.
+            options.profile = webdriver.FirefoxProfile()
+            # Disable browser auto-updates.
+            for preference in ('app.update.auto', 'app.update.enabled', 'app.update.silent'):
+                options.profile.set_preference(preference, False)
+            self._options = options
+        return self._options
 
     @property
     def browser(self):
-        if not self._browser:
-            # Remove old log file.
-            remove_file(self.log_path)
-
-            # Create custom Firefox profile.
-            profile = webdriver.FirefoxProfile()
-            # Disable browser auto-updates.
-            for preference in ('app.update.auto', 'app.update.enabled', 'app.update.silent'):
-                profile.set_preference(preference, False)
-
-            # Start Firefox webdriver instance.
-            self._browser = webdriver.Firefox(
-                firefox_profile=profile,
-                executable_path=get_file_path('bin/geckodriver'),
-                log_path=self.log_path,
-            )
+        if not hasattr(self, '_browser'):
+            # Start remote Firefox webdriver instance.
+            config = Config()
+            hub_url = (config['selenium']['hub_url']
+                       if ('selenium' in config and 'hub_url' in config['selenium'])
+                       else 'http://localhost:4444/wd/hub')
+            try:
+                self._browser = webdriver.Remote(
+                    command_executor=hub_url,
+                    options=self.options,
+                )
+            except urllib3.exceptions.MaxRetryError as e:
+                raise BrowserUnavailable(e)
         return self._browser
-# }}}
-
-
-class XvfbDisplay:  # {{{
-    dimensions = {'width': 1024, 'height': 1024}
-
-    def __init__(self):
-        super().__init__()
-        self._display = None
-
-    @property
-    def display(self):
-        if not self._display:
-            self._display = Xvfb(**self.dimensions)
-        return self._display
 # }}}

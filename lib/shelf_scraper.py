@@ -4,13 +4,14 @@ import logging
 import requests
 from json import JSONDecodeError
 from urllib.parse import urlparse
+from progress.bar import Bar
 from requests.exceptions import HTTPError, ConnectionError
 from multiprocessing import cpu_count
-from multiprocessing.dummy import Pool
-from selenium.common.exceptions import TimeoutException, NoSuchElementException
+from multiprocessing.dummy import Pool, Lock
 from lib.diskcache import diskcache, MONTH
 from lib.utils import bs4_scope
 from lib.config import Config
+from lib.common import get_file_path
 
 
 class LoginError(Exception):
@@ -94,12 +95,9 @@ class ShelfScraper:
 
         profile_url_re = re.compile(r'/profil/\d+/'.format({self.profile_name}),
                                     re.IGNORECASE)
-        try:
-            with bs4_scope(search_results) as parsed_results:
-                # Search for profile link in results.
-                profile_link = parsed_results.find('a', {'href': profile_url_re})
-        except (TimeoutException, NoSuchElementException) as e:
-            raise ProfileNotFoundError(f'HTML parsing error: {e}')
+        with bs4_scope(search_results) as parsed_results:
+            # Search for profile link in results.
+            profile_link = parsed_results.find('a', {'href': profile_url_re})
 
         if not profile_link:
             raise ProfileNotFoundError(f'Empty search result')
@@ -138,8 +136,6 @@ class ShelfScraper:
                 shelf_tags = profile_library.select(shelves_selector)
         except HTTPError as e:
             raise ShelvesScrapeError(f'HTML request error: {e}')
-        except (TimeoutException, NoSuchElementException) as e:
-            raise ShelvesScrapeError(f'HTML parsing error: {e}')
 
         if not shelf_tags:
             raise ShelvesScrapeError(f'Shelves list not found')
@@ -168,8 +164,6 @@ class ShelfScraper:
                                    if last_pager_tag else 1)
             except HTTPError as e:
                 raise ShelvesScrapeError(f'HTML request error: {e}')
-            except (TimeoutException, NoSuchElementException) as e:
-                raise ShelvesScrapeError(f'HTML parsing error: {e}')
 
             shelf = {
                 'id': shelf_id,
@@ -256,8 +250,6 @@ class ShelfScraper:
             raise BooksCollectError(f'JSON error: {e}')
         except HTTPError as e:
             raise BooksCollectError(f'HTML request error: {e}')
-        except (TimeoutException, NoSuchElementException) as e:
-            raise BooksCollectError(f'HTML parsing error: {e}')
 
         return book_urls
 
@@ -331,8 +323,6 @@ class ShelfScraper:
                     }
             except (HTTPError, JSONDecodeError) as e:
                 raise BooksCollectError(f'HTML request error: {e}')
-            except (TimeoutException, NoSuchElementException) as e:
-                raise BooksCollectError(f'HTML parsing error: {e}')
 
             return book_info
 
@@ -410,3 +400,57 @@ class ShelfScraper:
         return (path
                 if self.config['lc_profile_url'] in path
                 else f'{self.config["lc_profile_url"]}/{path}')
+
+
+class CLIShelfScraper(ShelfScraper):
+    logger = logging.getLogger('script')
+
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.bar = None
+        self.lock = Lock()
+
+    def get_shelf_book_urls(self, shelf):
+        bar_title = f'Collecting shelf pages'
+        with Bar(bar_title, max=shelf["pager_count"]) as self.bar:
+            shelf_book_urls = super().get_shelf_book_urls(shelf)
+        return shelf_book_urls
+
+    def get_page_book_urls(self, page_info_json):
+        book_urls = super().get_page_book_urls(page_info_json)
+        with self.lock:
+            self.bar.next()
+        return book_urls
+
+    def get_books_from_urls(self, shelf_book_urls):
+        bar_title = f'Collecting  books'
+        with Bar(bar_title, max=len(shelf_book_urls)) as self.bar:
+            shelf_books = super().get_books_from_urls(shelf_book_urls)
+        return shelf_books
+
+    def get_book_info(self, book_url):
+        book_info = super().get_book_info(book_url)
+        with self.lock:
+            self.bar.next()
+        return book_info
+
+    def set_book_prices(self, shelf_books):
+        bar_title = f'Collecting book prices'
+        with Bar(bar_title, max=len(shelf_books)) as self.bar:
+            super().set_book_prices(shelf_books)
+
+    def set_book_price(self, book):
+        super().set_book_price(book)
+        with self.lock:
+            self.bar.next()
+
+    def shelf_name_to_file_path(self, shelf_name):
+        shelf_filename = re.sub(r'\s+', '_', shelf_name.lower())
+        file_name = f'{self.profile_name}_{shelf_filename}.json'
+        return get_file_path('var', file_name)
+
+    def save_books_list(self, shelf_name, shelf_books):
+        file_path = self.shelf_name_to_file_path(shelf_name)
+        self.logger.info('Writing books to file')
+        with open(file_path, 'w', encoding='utf-8') as file_handle:
+            json.dump(shelf_books, file_handle, ensure_ascii=False, indent=2)

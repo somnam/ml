@@ -7,8 +7,8 @@ from lib.common import get_file_path
 # }}}
 
 
-def make_xls(file_name, worksheet_name, worksheet_headers, entries):
-    if not entries:
+def make_xls(file_name, worksheet_name, worksheet_headers, rows):
+    if not rows:
         return
 
     # Create a new workbook.
@@ -25,28 +25,28 @@ def make_xls(file_name, worksheet_name, worksheet_headers, entries):
     column_widths = [10 for _ in worksheet_headers]
     no_newlie_re = re.compile(r'^[^\n]*$')
     # Add rows
-    for entry in entries:
-        row = []
+    for row in rows:
+        sheet_row = []
         for index, header in enumerate(worksheet_headers):
-            entry_value = entry[header]
+            row_value = row[header]
             # Don't process empty values.
-            if entry_value is None:
-                row.append(None)
+            if row_value is None:
+                sheet_row.append(None)
                 continue
 
-            # Calculate entry length.
-            if no_newlie_re.match(entry_value):
-                entry_length = len(entry_value)
+            # Calculate row length.
+            if no_newlie_re.match(row_value):
+                row_length = len(row_value)
             else:
-                entry_length = len(max(entry_value.split(u"\n"), key=len))
+                row_length = len(max(row_value.split(u"\n"), key=len))
 
             # Adjust column width according to text length.
-            if entry_length > column_widths[index]:
-                column_widths[index] = entry_length
+            if row_length > column_widths[index]:
+                column_widths[index] = row_length
 
-            row.append(entry_value)
+            sheet_row.append(row_value)
 
-        sheet.append(row)
+        sheet.append(sheet_row)
 
     # Set column dimensions.
     for index in range(len(worksheet_headers)):

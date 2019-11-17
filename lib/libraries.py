@@ -1,25 +1,31 @@
 # Import {{{
 import re
+import sys
 import json
+import requests
 from operator import itemgetter
 from lib.diskcache import diskcache, DAY
-from lib.automata import FirefoxBrowserWrapper, XvfbDisplay
+from lib.automata import FirefoxBrowserWrapper
 from lib.config import Config
 from lib.common import (
     open_url,
     prepare_opener,
-    encode_url_params,
     get_parsed_url_response,
     get_url_net_location,
     get_unverifield_ssl_handler,
 )
+from lib.utils import bs4_scope
 from selenium.common.exceptions import NoSuchElementException
 from selenium.webdriver.common.keys import Keys
 from selenium.webdriver.common.by import By
 # }}}
 
 
-class LibraryScraper(XvfbDisplay, FirefoxBrowserWrapper):  # {{{
+def library_factory(library_id):
+    return getattr(sys.modules.get(__name__), f'Library{library_id}')
+
+
+class LibraryBase(FirefoxBrowserWrapper):  # {{{
     config = None
     handlers = []
     headers = None
@@ -29,6 +35,7 @@ class LibraryScraper(XvfbDisplay, FirefoxBrowserWrapper):  # {{{
         self.books = books
         self._uuids = None
         self._opener = None
+        self.session = None
 
     @property
     def uuids(self):
@@ -46,7 +53,7 @@ class LibraryScraper(XvfbDisplay, FirefoxBrowserWrapper):  # {{{
         return self._opener
 
     def run(self):
-        with self.display, self.browser:
+        with self.browser:
             # Open library page.
             self.browser.get(self.config['url'])
             # Check if correct library page is opened.
@@ -56,7 +63,6 @@ class LibraryScraper(XvfbDisplay, FirefoxBrowserWrapper):  # {{{
 
         # Sort books by deparment and section.
         books_status.sort(key=itemgetter('department', 'section'))
-
         return books_status
 
     def check_library_title(self):
@@ -157,7 +163,7 @@ class LibraryScraper(XvfbDisplay, FirefoxBrowserWrapper):  # {{{
 # }}}
 
 
-class Library4949(LibraryScraper):  # {{{
+class Library4949(LibraryBase):  # {{{
     config = Config()['libraries:4949']
 
     search_fields = ['isbn', 'title']
@@ -392,7 +398,7 @@ class Library4949(LibraryScraper):  # {{{
 # }}}
 
 
-class Library5004(LibraryScraper):  # {{{
+class Library5004(LibraryBase):  # {{{
     config = Config()['libraries:5004']
     search_fields = ['title_and_author']
 
@@ -477,18 +483,24 @@ class Library5004(LibraryScraper):  # {{{
             if book_info:
                 break
 
-            response = get_parsed_url_response(book_url, opener=self.opener)
-            items_list = response.findAll('div', {'class': self.items_list_re})
-            if not items_list:
-                response.decompose()
+            try:
+                with requests.Session() as self.session:
+                    response = self.session.get(book_url)
+                    response.raise_for_status()
+
+                    with bs4_scope(response.content) as book_page:
+                        items_list = book_page.find_all('div',
+                                                        {'class': self.items_list_re})
+                        if not items_list:
+                            continue
+
+                        book_info = self.extract_single_book_info(
+                            book_page.find('input', {'name': 'YII_CSRF_TOKEN'}).get('value'),
+                            items_list,
+                        )
+            except requests.exceptions.HTTPError as e:
+                print(f'Error fetching book url {book_url}: {e}')
                 continue
-
-            book_info = self.extract_single_book_info(
-                response.find('input', {'name': 'YII_CSRF_TOKEN'}).get('value'),
-                items_list,
-            )
-
-            response.decompose()
 
         return [book_info] if book_info else None
 
@@ -501,8 +513,10 @@ class Library5004(LibraryScraper):  # {{{
                 continue
 
             # Extract book location, section and availability from row.
-            item_signatures = item.div.find('dl', {'class': self.item_signature_re})\
-                                      .find_all('dd')
+            item_signatures = item.div.find(
+                'dl',
+                {'class': self.item_signature_re}
+            ).find_all('dd')
             if not item_signatures:
                 continue
 
@@ -521,33 +535,33 @@ class Library5004(LibraryScraper):  # {{{
 
             # All remaining available books will be in the same section.
             break
+
         return book_info
 
-    def get_book_accessibility(self, yii_token, result):
+    def get_book_accessibility(self, yii_token, item):
         accessibility_url = '{0}/itemrequest/getiteminfomessage'.format(
             self.config['base_url']
         )
         accessibility_params = {
-            "docid": result.get('data-item-id'),
-            "doclibid": result.get('data-item-lib-id'),
-            'locationid': result.get('data-item-location-id'),
+            "docid": item.get('data-item-id'),
+            "doclibid": item.get('data-item-lib-id'),
+            'locationid': item.get('data-item-location-id'),
             'accessibility': 1,
             "YII_CSRF_TOKEN": yii_token,
         }
         accessibility_params['libid'] = accessibility_params['doclibid']
 
-        accessibility_result = get_parsed_url_response(
+        response = self.session.post(
             accessibility_url,
-            data=encode_url_params(accessibility_params),
-            opener=self.opener,
+            data=accessibility_params,
+            headers=self.headers,
         )
-        if not accessibility_result:
-            return False
+        response.raise_for_status()
 
-        accessibility_value = json.loads(accessibility_result.html.body.p.text)
-        is_book_available = (self.config['accepted_status']
-                             in accessibility_value['message'])
-        accessibility_result.decompose()
-
-        return True if is_book_available else False
+        with bs4_scope(response.content) as accessibility_result:
+            accessibility_value = json.loads(
+                accessibility_result.html.body.p.text
+            )
+        return (self.config['accepted_status']
+                in accessibility_value['message'])
 # }}}

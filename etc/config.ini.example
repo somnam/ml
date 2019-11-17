@@ -7,18 +7,21 @@ lc_shelf_page_url = https://lubimyczytac.pl/profile/getLibraryBooksList
 bb_url = https://widget.getbuybox.com/v3/1/buybox.json
 retailers = []
 
-[opac]
-profile_id = profile id
-profile_name = profile name
+[selenium]
+nodes = 5
+hub_url = selenium hub url
+
+[library_scraper]
 workbook_title = workbook title
 libraries = ["4949", "5004"]
+worksheet_headers = ["author", "title", "department", "section", "pages", "link"]
 
 [libraries:4949]
 id = 4949
 url = http://185.43.138.133:8080/Opac4/
 book_url_suffix = Opac4/faces/Opis.jsp?ido=
 title = Opac
-source = shelf name
+shelf_name = shelf name
 accepted_locations = []
 
 [libraries:5004]
@@ -26,7 +29,7 @@ id = 5004
 url = https://katalog.rajska.info/catalog
 base_url = https://katalog.rajska.info
 title = Prolib Integro
-source = shelf name
+shelf_name = shelf name
 department = department name
 accepted_locations = []
 accepted_status = accepted status
