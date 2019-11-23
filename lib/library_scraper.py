@@ -5,12 +5,20 @@ import logging
 import datetime
 import concurrent.futures
 from lib.shelf_scraper import CLIShelfScraper
-from lib.libraries import library_factory
+from lib.libraries import library_factory, LibraryNotSupported  # noqa: F401
 from lib.automata import BrowserUnavailable
 from lib.gdocs import get_service_client, write_rows_to_worksheet
 from lib.xls import make_xls
 from lib.common import get_file_path
 from lib.config import Config
+
+
+class LibraryNotConfigured(Exception):
+    pass
+
+
+class BooksListUnavailable(Exception):
+    pass
 
 
 class LibraryScraper:
@@ -44,7 +52,7 @@ class LibraryScraper:
             if library_section in self.config and 'shelf_name' in self.config[library_section]:
                 shelf_name = self.config[library_section]['shelf_name']
             else:
-                shelf_name = None
+                raise LibraryNotConfigured('Library section not found in config')
 
             setattr(self, '_shelf_name', shelf_name)
         return self._shelf_name
@@ -63,20 +71,17 @@ class LibraryScraper:
         if not hasattr(self, '_shelf_books'):
             shelf_contents_file_path = get_file_path('var',
                                                      self.shelf_contents_file_name)
-
             # Read file contents.
             self.logger.info(f'Reading in books list from shelf "{self.shelf_name}"')
-            with open(shelf_contents_file_path, 'r', encoding='utf-8') as file_handle:
-                file_data = json.load(file_handle)
+            try:
+                with open(shelf_contents_file_path, 'r', encoding='utf-8') as file_handle:
+                    file_data = json.load(file_handle)
+            except (FileNotFoundError, json.JSONDecodeError) as e:
+                raise BooksListUnavailable(e)
+
             self.logger.debug(f'Read {len(file_data)} entries from file')
 
-            # Split shelf books for worker nodes.
-            step_size = math.ceil(len(file_data) / self.nodes)
-            shelf_books = [file_data[i:i + step_size]
-                           for i in range(0, len(file_data), step_size)]
-            self.logger.debug(f'Built {len(shelf_books)} batches for nodes')
-
-            setattr(self, '_shelf_books', shelf_books)
+            setattr(self, '_shelf_books', file_data)
         return self._shelf_books
 
     def run(self):
@@ -91,7 +96,7 @@ class LibraryScraper:
         # Fetch books status from library.
         try:
             books_status = self.fetch_books_status()
-        except BrowserUnavailable as e:
+        except (BrowserUnavailable, BooksListUnavailable) as e:
             self.logger.error(f'Feching books status failed: {e}')
             return
 
@@ -105,9 +110,16 @@ class LibraryScraper:
     def fetch_books_status(self):
         shelf_books = self.shelf_books
         self.logger.info(f'Fetching {len(shelf_books)} books library status')
+
+        # Split shelf books into batches for worker nodes.
+        step_size = math.ceil(len(shelf_books) / self.nodes)
+        shelf_books_per_node = [shelf_books[i:i + step_size]
+                                for i in range(0, len(shelf_books), step_size)]
+        self.logger.debug(f'Built {len(shelf_books_per_node)} batches for nodes')
+
         with concurrent.futures.ThreadPoolExecutor(max_workers=self.nodes) as executor:
             books_status_from_nodes = executor.map(self.fetch_books_status_using_node,
-                                                   shelf_books)
+                                                   shelf_books_per_node)
         return [
             book_status
             for books_status_batch in books_status_from_nodes

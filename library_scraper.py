@@ -1,7 +1,10 @@
 import click
 import logging
 import logging.config
-from lib.library_scraper import CLILibraryScraper
+from lib.library_scraper import (CLILibraryScraper,
+                                 LibraryNotSupported,
+                                 LibraryNotConfigured,
+                                 BooksListUnavailable)
 from lib.common import get_file_path
 from lib.config import Config
 
@@ -22,10 +25,13 @@ def run(context, library_id, profile_name, auth_data, refresh):
         click.echo(context.get_help(), color=context.color)
         return
 
-    CLILibraryScraper(library_id=library_id,
-                      profile_name=profile_name,
-                      auth_data=auth_data,
-                      refresh=refresh).run()
+    try:
+        CLILibraryScraper(library_id=library_id,
+                          profile_name=profile_name,
+                          auth_data=auth_data,
+                          refresh=refresh).run()
+    except (LibraryNotSupported, LibraryNotConfigured, BooksListUnavailable) as e:
+        click.echo(e, color=context.color)
 
 
 if __name__ == '__main__':

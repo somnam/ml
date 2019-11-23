@@ -5,7 +5,7 @@ import json
 import requests
 from operator import itemgetter
 from lib.diskcache import diskcache, DAY
-from lib.automata import FirefoxBrowserWrapper
+from lib.automata import FirefoxBrowser
 from lib.config import Config
 from lib.common import (
     open_url,
@@ -17,18 +17,23 @@ from lib.common import (
 from lib.utils import bs4_scope
 from selenium.common.exceptions import NoSuchElementException
 from selenium.webdriver.common.keys import Keys
-from selenium.webdriver.common.by import By
 # }}}
 
 
+class LibraryNotSupported(Exception):
+    pass
+
+
 def library_factory(library_id):
-    return getattr(sys.modules.get(__name__), f'Library{library_id}')
+    try:
+        return getattr(sys.modules.get(__name__), f'Library{library_id}')
+    except AttributeError:
+        raise LibraryNotSupported(f'Library with id {library_id} not supported')
 
 
-class LibraryBase(FirefoxBrowserWrapper):  # {{{
+class LibraryBase:  # {{{
     config = None
     handlers = []
-    headers = None
 
     def __init__(self, books):
         super().__init__()
@@ -36,6 +41,7 @@ class LibraryBase(FirefoxBrowserWrapper):  # {{{
         self._uuids = None
         self._opener = None
         self.session = None
+        self.browser = None
 
     @property
     def uuids(self):
@@ -48,12 +54,11 @@ class LibraryBase(FirefoxBrowserWrapper):  # {{{
     def opener(self):
         if not self._opener:
             self._opener = prepare_opener(self.config['url'],
-                                          handlers=self.handlers,
-                                          headers=self.headers)
+                                          handlers=self.handlers)
         return self._opener
 
     def run(self):
-        with self.browser:
+        with FirefoxBrowser() as self.browser:
             # Open library page.
             self.browser.get(self.config['url'])
             # Check if correct library page is opened.
@@ -209,51 +214,51 @@ class Library4949(LibraryBase):  # {{{
             break
 
         # Clear form before using.
-        if (self.wait_is_visible(self.clear_button_id)):
+        if self.browser.wait_is_visible_by_id(self.clear_button_id):
             clear = self.browser.find_element_by_id(self.clear_button_id)
             clear.click()
 
         return
 
     def hide_autocomplete_popup(self, text_field_id, autocomp_popup_id):
-        if (self.wait_is_visible(autocomp_popup_id)):
+        if self.browser.wait_is_visible_by_id(autocomp_popup_id):
             text_field = self.browser.find_element_by_id(text_field_id)
             text_field.send_keys(Keys.ESCAPE)
-            self.wait_is_not_visible(autocomp_popup_id)
+            self.browser.wait_is_not_visible_by_id(autocomp_popup_id)
 
     def query_book_by_isbn(self, book):
         search_type = '3'
         resource_type = '2'
         submit_button_id = 'form1:btnSzukajIndeks'
-        results_list_xpath = '//ul[@class="kl"]'
 
         # Select standard form.
         self.select_form('Indeks')
 
         # Input search value.
-        self.set_input_value('form1:textField1', book['isbn'])
+        self.browser.set_input_value_by_id('form1:textField1', book['isbn'])
 
         # Hide autocomplete popup.
         self.hide_autocomplete_popup('form1:textField1', 'autoc1')
 
         # Set search type.
-        self.select_by_id_and_value(self.search_type_id, search_type)
+        self.browser.set_select_option_by_id(self.search_type_id, search_type)
 
         # Set resource_type.
-        self.select_by_id_and_value(self.resource_type_id, resource_type)
+        self.browser.set_select_option_by_id(self.resource_type_id, resource_type)
 
         # Submit form.
         results = None
-        if (self.wait_is_visible(submit_button_id)):
+        if self.browser.wait_is_visible_by_id(submit_button_id):
             submit = self.browser.find_element_by_id(submit_button_id)
             submit.click()
 
             # Wait for results to appear.
-            if (self.wait_is_visible(results_list_xpath, By.XPATH)):
-                results_wrapper = self.browser.find_element_by_xpath(
-                    results_list_xpath
+            results_list_selector = 'ul.kl'
+            if self.browser.wait_is_visible_by_css_selector(results_list_selector):
+                results_wrapper = self.browser.find_element_by_css_selector(
+                    results_list_selector
                 )
-                results = results_wrapper.find_elements_by_xpath('li/a')
+                results = results_wrapper.find_elements_by_css_selector('li>a')
 
         # Return search results.
         return results
@@ -271,24 +276,24 @@ class Library4949(LibraryBase):  # {{{
             author_name_list.pop(),
             ' '.join(author_name_list)
         )
-        self.set_input_value('form1:textField1', author_string)
+        self.browser.set_input_value_by_id('form1:textField1', author_string)
         # Hide autocomplete popup.
         self.hide_autocomplete_popup('form1:textField1', 'autoc1')
 
         # Input book title.
-        self.set_input_value('form1:textField2', book['title'])
+        self.browser.set_input_value_by_id('form1:textField2', book['title'])
         # Hide autocomplete popup.
         self.hide_autocomplete_popup('form1:textField2', 'autoc2')
 
         # Set resource_type.
-        self.select_by_id_and_value(self.resource_type_id, resource_type)
+        self.browser.set_select_option_by_id(self.resource_type_id, resource_type)
 
         results = None
-        if (self.wait_is_visible(submit_button_id)):
+        if self.browser.wait_is_visible_by_id(submit_button_id):
             submit = self.browser.find_element_by_id(submit_button_id)
             submit.click()
 
-            if (self.wait_is_visible('opisy')):
+            if self.browser.wait_is_visible_by_id('opisy'):
                 results = self.browser.find_elements_by_class_name('opis')
 
         # Return search results.
@@ -403,7 +408,6 @@ class Library5004(LibraryBase):  # {{{
     search_fields = ['title_and_author']
 
     handlers = [get_unverifield_ssl_handler()]
-    headers = {'X-Requested-With': 'XMLHttpRequest'}
 
     search_input = '#SimpleSearchForm_q'
     search_button = '.btn.search-main-btn'
@@ -415,7 +419,7 @@ class Library5004(LibraryBase):  # {{{
     def get_book_info(self, book):
         # Wait for submit button to be visible.
         try:
-            self.wait_is_visible_by_css(self.search_button)
+            self.browser.wait_is_visible_by_css_selector(self.search_button)
         except NoSuchElementException:
             pass
 
@@ -432,8 +436,9 @@ class Library5004(LibraryBase):  # {{{
 
     def set_search_value(self, search_value):
         # Input search value.
-        if self.wait_is_visible_by_css(self.search_input):
-            self.find_by_css(self.search_input).send_keys(search_value)
+        if self.browser.wait_is_visible_by_css_selector(self.search_input):
+            self.browser.find_element_by_css_selector(self.search_input)\
+                .send_keys(search_value)
             return True
         return False
 
@@ -444,21 +449,24 @@ class Library5004(LibraryBase):  # {{{
             return None
 
         # Submit form.
-        self.find_by_css(self.search_button).click()
+        self.browser.find_element_by_css_selector(self.search_button).click()
 
         # Wait for results to load.
-        self.wait_is_visible_by_css(self.results_header)
+        self.browser.wait_is_visible_by_css_selector(self.results_header)
 
         results = None
         try:
-            self.find_by_css('.info-empty')
+            self.browser.find_element_by_css_selector('.info-empty')
         except NoSuchElementException:
             # Display up to 100 results on page.
-            if self.wait_is_visible_by_css('.btn-group>.hidden-xs'):
-                self.find_by_css('.btn-group>.hidden-xs').click()
-                if self.wait_is_visible_by_css('.btn-group.open>.dropdown-menu'):
-                    self.find_by_css('.btn-group.open>.dropdown-menu>li:last-child').click()
-            results = self.find_all_by_css('dl.dl-horizontal')
+            if self.browser.wait_is_visible_by_css_selector('.btn-group>.hidden-xs'):
+                self.browser.find_element_by_css_selector('.btn-group>.hidden-xs')\
+                    .click()
+                if self.browser.wait_is_visible_by_css_selector('.btn-group.open>.dropdown-menu'):
+                    self.browser.find_element_by_css_selector(
+                        '.btn-group.open>.dropdown-menu>li:last-child'
+                    ).click()
+            results = self.browser.find_elements_by_css_selector('dl.dl-horizontal')
         return results
 
     def get_matching_result(self, book, search_field, results):
@@ -554,7 +562,7 @@ class Library5004(LibraryBase):  # {{{
         response = self.session.post(
             accessibility_url,
             data=accessibility_params,
-            headers=self.headers,
+            headers={'X-Requested-With': 'XMLHttpRequest'},
         )
         response.raise_for_status()
 

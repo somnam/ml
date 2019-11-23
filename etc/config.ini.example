@@ -9,6 +9,7 @@ retailers = []
 
 [selenium]
 nodes = 5
+headless = True
 hub_url = selenium hub url
 
 [library_scraper]
