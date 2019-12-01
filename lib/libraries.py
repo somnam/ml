@@ -2,18 +2,11 @@
 import re
 import sys
 import json
+import logging
 import requests
-from operator import itemgetter
 from lib.diskcache import diskcache, DAY
 from lib.automata import FirefoxBrowser
 from lib.config import Config
-from lib.common import (
-    open_url,
-    prepare_opener,
-    get_parsed_url_response,
-    get_url_net_location,
-    get_unverifield_ssl_handler,
-)
 from lib.utils import bs4_scope
 from selenium.common.exceptions import NoSuchElementException
 from selenium.webdriver.common.keys import Keys
@@ -24,6 +17,10 @@ class LibraryNotSupported(Exception):
     pass
 
 
+class LibraryPageNotValid(Exception):
+    pass
+
+
 def library_factory(library_id):
     try:
         return getattr(sys.modules.get(__name__), f'Library{library_id}')
@@ -31,208 +28,159 @@ def library_factory(library_id):
         raise LibraryNotSupported(f'Library with id {library_id} not supported')
 
 
+def cli_library_factory(*args, **kwargs):
+    library = library_factory(*args, **kwargs)
+    setattr(library, 'logger', logging.getLogger('script'))
+    return library
+
+
 class LibraryBase:  # {{{
     config = None
-    handlers = []
+    logger = logging.getLogger(__name__)
 
     def __init__(self, books):
         super().__init__()
         self.books = books
-        self._uuids = None
-        self._opener = None
         self.session = None
         self.browser = None
 
     @property
-    def uuids(self):
-        if not self._uuids:
-            self._uuids = {book["isbn"]: f'{self.config["id"]}:{book["isbn"]}'
-                           for book in self.books}
-        return self._uuids
-
-    @property
-    def opener(self):
-        if not self._opener:
-            self._opener = prepare_opener(self.config['url'],
-                                          handlers=self.handlers)
-        return self._opener
+    def books_by_uid(self):
+        if not hasattr(self, '_books_by_uid'):
+            # Use book uuid as cache key.
+            self._books_by_uid = {f'{self.config["id"]}:{book["isbn"]}': book
+                                  for book in self.books}
+        return self._books_by_uid
 
     def run(self):
-        with FirefoxBrowser() as self.browser:
-            # Open library page.
-            self.browser.get(self.config['url'])
-            # Check if correct library page is opened.
-            self.check_library_title()
-            # Fetch all books status.
-            books_status = self.get_books_status()
+        with FirefoxBrowser() as self.browser, requests.Session() as self.session:
+            # Open requested library page.
+            self.open_library_page()
+            # Fetch all books info.
+            books_info = self.get_books_info()
 
-        # Sort books by deparment and section.
-        books_status.sort(key=itemgetter('department', 'section'))
-        return books_status
+        return books_info
 
-    def check_library_title(self):
+    def open_library_page(self):
+        # Open library page.
+        self.browser.get(self.config['url'])
+        # Check if correct library page is opened.
         if 'title' in self.config and self.config['title']:
-            assert self.config['title'] in self.browser.title
+            if self.config['title'] not in self.browser.title:
+                raise LibraryPageNotValid('Incorrect library page title:'
+                                          f' {self.browser.title}')
 
-    def get_books_status(self):
+    def get_books_info(self):
         # Allows to cache library info for given time.
         cached_book_info_wrapper = self.cached_book_info_wrapper()
 
-        books_status = {}
-        for book in self.books:
-            # Check if wasn't already processed.
-            book_uid = self.uuids[book["isbn"]]
-            if book_uid in books_status:
-                continue
-            # Fetch book info
-            book_json = cached_book_info_wrapper(book_uid)
-            # Don't append empty info.
-            if book_json:
-                books_status[book_uid] = json.loads(book_json)
+        books_info = []
+        for book_uid, book in self.books_by_uid.items():
+            # Fetch book info.
+            book_info_json = cached_book_info_wrapper(book_uid)
 
-        return [status for entry in books_status.values() for status in entry]
+            # Don't append empty info.
+            if not book_info_json:
+                continue
+
+            try:
+                books_info.append(json.loads(book_info_json))
+            except json.JSONDecodeError as e:
+                self.logger.warning('Unable to decode status for book'
+                                    f' "{book["title"]}" by {book["author"]}: {e}')
+
+        return [info for entry in books_info for info in entry]
 
     def cached_book_info_wrapper(self):
-        # Use book uuid as cache key.
-        books_by_uid = {self.uuids[book["isbn"]]: book for book in self.books}
-
-        # Cache book fetch status for 24h.
+        # Cache book info for 24h.
         @diskcache(DAY)
         def get_cached_book_info(book_uid):
-            return self.get_book_info(books_by_uid[book_uid])
+            return self.get_book_info(self.books_by_uid[book_uid])
         return get_cached_book_info
 
     def get_book_info(self, book):
-        book_info = None
         # Search fields are used to retry fetching book info.
         search_fields = self.search_fields[:]
-        while not book_info and search_fields:
+        while search_fields:
             # Search first by isbn, then by title.
             search_field = search_fields.pop(0)
 
             # Fetch book info.
-            book_info, is_unavailable = self.query_book_info(book, search_field)
+            book_info = self.query_book_info(book, search_field)
 
             # Book was found as available or unavailable.
-            if book_info or is_unavailable:
+            if book_info is not None:
+                book_info = self.process_book_info(book, book_info)
                 break
+            # Any fields to search by remain?
             elif search_fields:
-                print('Retry book fetching.')
+                self.logger.info(f'Retry fetching book "{book["title"]}"'
+                                 f' by {book["author"]}.')
+            # Book was not found for any search field.
             else:
-                print(f'Book "{book["title"]}" by {book["author"]} not found.')
+                self.logger.info(f'Book "{book["title"]}" by {book["author"]}'
+                                 ' not found.')
+                book_info = None
 
         return book_info
 
     def query_book_info(self, book, search_field):
         # Query book and fetch results.
         query_results = self.query_book(book, search_field)
-        query_match = self.get_matching_result(book, search_field, query_results)
+        query_match = self.get_matching_results(book, search_field, query_results)
         book_info = self.extract_book_info(book, query_match)
 
-        return self.process_book_info(book, book_info)
+        return book_info
 
     def process_book_info(self, book, book_info):
         # Book info:
         # None - book wasn't found, search by other criteria
         # []   - book was found but is unavailable, end search
         is_unavailable = book_info is not None and not book_info
+        if is_unavailable:
+            self.logger.warning(f'Book "{book["title"]}" by {book["author"]}'
+                                ' not available.')
+            return None
 
         # Book has been successfully queried or is not for rent.
-        if book_info:
-            print(f'Successfully queried "{book["title"]}"'
-                  f' by {book["author"]} info.')
-            # Return info in json format.
-            book_info = json.dumps([{
-                "author": book["author"],
-                "title": f'"{book["title"]}"',
-                "department": entry[0],
-                "section": entry[1],
-                "pages": book["pages"],
-                "link": book["url"],
-            } for entry in book_info])
-        # If book is unavailable then don't search for it a second time.
-        elif is_unavailable:
-            print(f'Book "{book["title"]}" by {book["author"]} not available.')
-            book_info = None
-
-        return book_info, is_unavailable
+        self.logger.info(f'Successfully queried "{book["title"]}"'
+                         f' by {book["author"]} info.')
+        # Return info in json format.
+        return json.dumps([{
+            "author": book["author"],
+            "title": f'"{book["title"]}"',
+            "department": entry[0],
+            "section": entry[1],
+            "pages": book["pages"],
+            "link": book["url"],
+        } for entry in book_info])
 
     def query_book(self, book, search_field):
         raise NotImplementedError()
 
-    def get_matching_result(self, book, search_field):
+    def get_matching_results(self, book, search_field):
         raise NotImplementedError()
 
-    def extract_book_info(self, book, search_field):
+    def extract_book_info(self, book, results):
         raise NotImplementedError()
 # }}}
 
 
 class Library4949(LibraryBase):  # {{{
     config = Config()['libraries:4949']
-
     search_fields = ['isbn', 'title']
 
-    isbn_re = re.compile(r'\D+')
-    section_re = re.compile(r'\s\(\s.+\s\)\s')
-
-    search_type_id = 'form1:dropdown1'
-    resource_type_id = 'form1:dropdown4'
-    clear_button_id = 'form1:btnCzyscForme'
-
-    def __init__(self, books):
-        super().__init__(books)
-        self._net_location = None
-
-    @property
-    def net_location(self):
-        if not self._net_location:
-            # Get base url from redirect.
-            self._net_location = get_url_net_location(
-                # Get redirect url from site response
-                open_url(self.config["url"], self.opener).geturl()
-            )
-        return self._net_location
-
-    # Search type: 1 - Author, 2 - Title, 3 - ISBN, 4 - Series
-    # Resource type: 1  - All, 2  - Book, 9  - Magazine, 15 - Audiobook
     def query_book(self, book, search_field):
-        if not(search_field in book and book[search_field]):
+        if not book.get(search_field):
             return
 
         return (self.query_book_by_isbn(book)
                 if search_field == 'isbn'
                 else self.query_book_by_title(book))
 
-    def select_form(self, form_type):
-        # Select standard or advanced form.
-        links_wrapper = self.browser.find_element_by_class_name('historia')
-        for link in links_wrapper.find_elements_by_tag_name('a'):
-            if link.text != form_type:
-                continue
-            link.click()
-            break
-
-        # Clear form before using.
-        if self.browser.wait_is_visible_by_id(self.clear_button_id):
-            clear = self.browser.find_element_by_id(self.clear_button_id)
-            clear.click()
-
-        return
-
-    def hide_autocomplete_popup(self, text_field_id, autocomp_popup_id):
-        if self.browser.wait_is_visible_by_id(autocomp_popup_id):
-            text_field = self.browser.find_element_by_id(text_field_id)
-            text_field.send_keys(Keys.ESCAPE)
-            self.browser.wait_is_not_visible_by_id(autocomp_popup_id)
-
     def query_book_by_isbn(self, book):
-        search_type = '3'
-        resource_type = '2'
-        submit_button_id = 'form1:btnSzukajIndeks'
-
         # Select standard form.
-        self.select_form('Indeks')
+        self.select_search_form('indeks')
 
         # Input search value.
         self.browser.set_input_value_by_id('form1:textField1', book['isbn'])
@@ -241,16 +189,18 @@ class Library4949(LibraryBase):  # {{{
         self.hide_autocomplete_popup('form1:textField1', 'autoc1')
 
         # Set search type.
-        self.browser.set_select_option_by_id(self.search_type_id, search_type)
+        search_type = '3'
+        self.browser.set_select_option_by_id('form1:dropdown1', search_type)
 
         # Set resource_type.
-        self.browser.set_select_option_by_id(self.resource_type_id, resource_type)
+        resource_type = '2'
+        self.browser.set_select_option_by_id('form1:dropdown4', resource_type)
 
         # Submit form.
         results = None
+        submit_button_id = 'form1:btnSzukajIndeks'
         if self.browser.wait_is_visible_by_id(submit_button_id):
-            submit = self.browser.find_element_by_id(submit_button_id)
-            submit.click()
+            self.browser.find_element_by_id(submit_button_id).click()
 
             # Wait for results to appear.
             results_list_selector = 'ul.kl'
@@ -264,11 +214,8 @@ class Library4949(LibraryBase):  # {{{
         return results
 
     def query_book_by_title(self, book):
-        resource_type = '2'
-        submit_button_id = 'form1:btnSzukajOpisow'
-
         # Select advanced form.
-        self.select_form('Złożone')
+        self.select_search_form('zaawansowane')
 
         # Input book author.
         author_name_list = book['author'].split(' ')
@@ -286,118 +233,116 @@ class Library4949(LibraryBase):  # {{{
         self.hide_autocomplete_popup('form1:textField2', 'autoc2')
 
         # Set resource_type.
-        self.browser.set_select_option_by_id(self.resource_type_id, resource_type)
+        resource_type = '2'
+        self.browser.set_select_option_by_id('form1:dropdown4', resource_type)
 
         results = None
+        submit_button_id = 'form1:btnSzukajOpisow'
         if self.browser.wait_is_visible_by_id(submit_button_id):
-            submit = self.browser.find_element_by_id(submit_button_id)
-            submit.click()
-
+            self.browser.find_element_by_id(submit_button_id).click()
             if self.browser.wait_is_visible_by_id('opisy'):
                 results = self.browser.find_elements_by_class_name('opis')
 
         # Return search results.
         return results
 
-    def get_matching_result(self, book, search_field, results):
+    def select_search_form(self, form_type):
+        # Select given form.
+        form_selector = f'div.historia a[title*="{form_type}"]'
+        if self.browser.wait_is_visible_by_css_selector(form_selector):
+            self.browser.find_element_by_css_selector(form_selector).click()
+
+        # Clear form before using.
+        clear_button_id = 'form1:btnCzyscForme'
+        if self.browser.wait_is_visible_by_id(clear_button_id):
+            self.browser.find_element_by_id(clear_button_id).click()
+
+    def hide_autocomplete_popup(self, text_field_id, autocomp_popup_id):
+        if self.browser.wait_is_visible_by_id(autocomp_popup_id):
+            text_field = self.browser.find_element_by_id(text_field_id)
+            text_field.send_keys(Keys.ESCAPE)
+            self.browser.wait_is_not_visible_by_id(autocomp_popup_id)
+
+    def get_matching_results(self, book, search_field, results):
         if not results:
             return
 
-        return (self.get_matching_result_isbn(book, results)
+        return (self.get_matching_results_by_isbn(book, results)
                 if search_field == 'isbn'
-                else self.get_matching_result_title(book, results))
+                else self.get_matching_results_by_title(book, results))
 
-    def get_matching_result_isbn(self, book, results):
-        match_value = book['isbn'].replace('-', '')
+    def get_matching_results_by_isbn(self, book, results):
+        # Match result using isbn value.
+        isbn_value = book['isbn'].replace('-', '')
+        isbn_result = next((result for result in results
+                            if re.sub(r'\D+', '', result.text) == isbn_value),
+                           None)
+        # No match found - empty results list.
+        if not isbn_result:
+            return []
 
-        matching = []
-        for elem in results:
-            # Replace all non-numeric characters in isbn.
-            elem_value = self.isbn_re.sub('', elem.text)
-            if elem_value != match_value:
-                continue
+        # Expand matching results entry and get book links.
+        isbn_result.click()
+        try:
+            self.browser.wait_is_visible_by_css_selector('div.zawartosc')
+            return [
+                link.get_attribute('href') for link in
+                self.browser.find_elements_by_css_selector('div.zawartosc ul a')
+            ]
+        except NoSuchElementException:
+            return []
 
-            matching = self.extract_matching_results(elem)
-            break
-
-        return matching
-
-    def get_matching_result_title(self, book, results):
+    def get_matching_results_by_title(self, book, results):
         matching = []
         for elem in results:
             book_id = elem.get_attribute('id').replace('dvop', '')
-            matching.append('{0}{1}{2}'.format(
-                self.net_location,
-                self.config['book_url_suffix'],
-                book_id
-            ))
-
+            matching.append(f'{self.config["book_url"]}{book_id}')
         return matching
 
-    def extract_matching_results(self, elem):
-        elem.click()
-        content = elem.find_element_by_xpath('..') \
-                      .find_element_by_class_name('zawartosc')
-        results = []
-        try:
-            results = [match.get_attribute('href')
-                       for match in content.find_elements_by_tag_name('a')]
-        except NoSuchElementException:
-            pass
-
-        return results
-
     def extract_book_info(self, book, results):
-        if not (book and results):
+        if not results:
             return
+
+        accepted_locations = self.config.getstruct('accepted_locations')
 
         book_info = []
         for book_url in results:
-            response = get_parsed_url_response(book_url, opener=self.opener)
-            resource = response.find('div', {'id': 'zasob'})
-            if (not resource or not resource.contents or resource.text.strip() == 'Brak zasobu'):
-                response.decompose()
+            try:
+                response = self.session.get(book_url)
+                response.raise_for_status()
+            except requests.exceptions.HTTPError as e:
+                self.logger.error(f'Error fetching url {book_url}: {e}')
                 continue
 
-            ul = resource.find('ul', {'class': 'zas_filie'})
-            for li in ul.find_all('li'):
-                department_info = li.find('div', {'class': 'filia'})
+            with bs4_scope(response.content) as book_page:
+                for li in book_page.select('div.zasob ul.zas_filie > li'):
+                    # Get department info.
+                    department_info = li.select_one('div.filia')
+                    if not(department_info and department_info.contents):
+                        continue
 
-                # Get library address.
-                department, address = '', ''
-                if (department_info and department_info.contents):
-                    department = department_info.contents[0]
-                    location = (department_info.contents[-1].split(',')
-                                if department_info.contents[-1] else None)
-                    address = (location[0] if location else None)
+                    # Get library address.
+                    department, _, location = department_info.contents
+                    address = location.split(',')[0] if location else None
 
-                # Check if address is in accepted list.
-                if address not in self.config.getstruct('accepted_locations'):
-                    continue
+                    # Check if address is in accepted list.
+                    if address not in accepted_locations:
+                        continue
 
-                # Check if book is rented/not available.
-                warning = li.find('div', {'class': 'opis_uwaga'})
-                not_available = li.find('img', {'title': 'Pozycja nie do wypożyczenia'})
-                if (not_available or (warning and warning.text)):
-                    continue
+                    # Get availability info.
+                    availability = li.select_one('div.dostepnosc').text
+                    available = re.search(r'\d', availability)
 
-                # Get availability info.
-                availability = [int(d) for d in
-                                li.find('div', {'class': 'dostepnosc'}).text.split()
-                                if d.isdigit()]
+                    # Book is not available.
+                    if not(available and int(available.group()) > 0):
+                        continue
 
-                # Book is not available.
-                if not(availability and availability[0]):
-                    continue
+                    # Extract section name.
+                    section_info = li.select_one('table.zasob tr>td:nth-last-child(2)')
+                    section_match = re.search(r'\s\(\s(.+)\s\)\s', section_info.text)
+                    section = section_match.group(1) if section_match else ''
 
-                # Extract section name.
-                section_info = li.find('table', {'class': 'zasob'}).td.find_next('td')
-                section_match = self.section_re.search(section_info.text)
-                section = section_match.group().strip() if section_match else ''
-
-                book_info.append((department, section))
-
-            response.decompose()
+                    book_info.append((department, section))
 
         return book_info
 # }}}
@@ -407,19 +352,11 @@ class Library5004(LibraryBase):  # {{{
     config = Config()['libraries:5004']
     search_fields = ['title_and_author']
 
-    handlers = [get_unverifield_ssl_handler()]
-
-    search_input = '#SimpleSearchForm_q'
-    search_button = '.btn.search-main-btn'
-    results_header = '.row.row-full-text'
-
-    items_list_re = re.compile('prolibitem')
-    item_signature_re = re.compile('dl-horizontal')
-
     def get_book_info(self, book):
         # Wait for submit button to be visible.
         try:
-            self.browser.wait_is_visible_by_css_selector(self.search_button)
+            search_button = '.btn.search-main-btn'
+            self.browser.wait_is_visible_by_css_selector(search_button)
         except NoSuchElementException:
             pass
 
@@ -427,8 +364,8 @@ class Library5004(LibraryBase):  # {{{
 
         # Reopen search form page.
         try:
-            button = self.browser.find_element_by_class_name('library_title-pages')
-            button.find_element_by_tag_name('a').click()
+            main_page_selector = 'h1.library_title-pages > a'
+            self.browser.find_element_by_css_selector(main_page_selector).click()
         except NoSuchElementException:
             pass
 
@@ -436,8 +373,9 @@ class Library5004(LibraryBase):  # {{{
 
     def set_search_value(self, search_value):
         # Input search value.
-        if self.browser.wait_is_visible_by_css_selector(self.search_input):
-            self.browser.find_element_by_css_selector(self.search_input)\
+        search_input = '#SimpleSearchForm_q'
+        if self.browser.wait_is_visible_by_css_selector(search_input):
+            self.browser.find_element_by_css_selector(search_input)\
                 .send_keys(search_value)
             return True
         return False
@@ -449,10 +387,12 @@ class Library5004(LibraryBase):  # {{{
             return None
 
         # Submit form.
-        self.browser.find_element_by_css_selector(self.search_button).click()
+        search_button = '.btn.search-main-btn'
+        self.browser.find_element_by_css_selector(search_button).click()
 
         # Wait for results to load.
-        self.browser.wait_is_visible_by_css_selector(self.results_header)
+        results_header = '.row.row-full-text'
+        self.browser.wait_is_visible_by_css_selector(results_header)
 
         results = None
         try:
@@ -469,7 +409,7 @@ class Library5004(LibraryBase):  # {{{
             results = self.browser.find_elements_by_css_selector('dl.dl-horizontal')
         return results
 
-    def get_matching_result(self, book, search_field, results):
+    def get_matching_results(self, book, search_field, results):
         if not results:
             return
 
@@ -482,33 +422,32 @@ class Library5004(LibraryBase):  # {{{
         return matching
 
     def extract_book_info(self, book, results):
-        if not (book and results):
+        if not results:
             return
 
         book_info = None
         for book_url in results:
-            # All books are available in the same section.
-            if book_info:
-                break
-
             try:
-                with requests.Session() as self.session:
-                    response = self.session.get(book_url)
-                    response.raise_for_status()
-
-                    with bs4_scope(response.content) as book_page:
-                        items_list = book_page.find_all('div',
-                                                        {'class': self.items_list_re})
-                        if not items_list:
-                            continue
-
-                        book_info = self.extract_single_book_info(
-                            book_page.find('input', {'name': 'YII_CSRF_TOKEN'}).get('value'),
-                            items_list,
-                        )
+                response = self.session.get(book_url)
+                response.raise_for_status()
             except requests.exceptions.HTTPError as e:
-                print(f'Error fetching book url {book_url}: {e}')
+                self.logger.error(f'Error fetching url {book_url}: {e}')
                 continue
+
+            with bs4_scope(response.content) as book_page:
+                items_list = book_page.select('div.prolibitem')
+                yii_token = book_page.select_one('input[name="YII_CSRF_TOKEN"]')\
+                    .get('value')
+                if not(items_list and yii_token):
+                    continue
+
+                book_info = self.extract_single_book_info(
+                    yii_token=yii_token,
+                    items_list=items_list,
+                )
+                # All books are available in the same section.
+                if book_info:
+                    break
 
         return [book_info] if book_info else None
 
@@ -521,10 +460,7 @@ class Library5004(LibraryBase):  # {{{
                 continue
 
             # Extract book location, section and availability from row.
-            item_signatures = item.div.find(
-                'dl',
-                {'class': self.item_signature_re}
-            ).find_all('dd')
+            item_signatures = item.select('dl.dl-horizontal dd')
             if not item_signatures:
                 continue
 
@@ -559,12 +495,16 @@ class Library5004(LibraryBase):  # {{{
         }
         accessibility_params['libid'] = accessibility_params['doclibid']
 
-        response = self.session.post(
-            accessibility_url,
-            data=accessibility_params,
-            headers={'X-Requested-With': 'XMLHttpRequest'},
-        )
-        response.raise_for_status()
+        try:
+            response = self.session.post(
+                accessibility_url,
+                data=accessibility_params,
+                headers={'X-Requested-With': 'XMLHttpRequest'},
+            )
+            response.raise_for_status()
+        except requests.exceptions.HTTPError as e:
+            self.logger.error(f'Error fetching url {accessibility_url}: {e}')
+            return False
 
         with bs4_scope(response.content) as accessibility_result:
             accessibility_value = json.loads(

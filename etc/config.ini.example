@@ -20,7 +20,7 @@ worksheet_headers = ["author", "title", "department", "section", "pages", "link"
 [libraries:4949]
 id = 4949
 url = http://185.43.138.133:8080/Opac4/
-book_url_suffix = Opac4/faces/Opis.jsp?ido=
+book_url = http://185.43.138.133:8080/Opac4/faces/Opis.jsp?ido=
 title = Opac
 shelf_name = shelf name
 accepted_locations = []

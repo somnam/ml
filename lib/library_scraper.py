@@ -4,8 +4,11 @@ import math
 import logging
 import datetime
 import concurrent.futures
+from operator import itemgetter
 from lib.shelf_scraper import CLIShelfScraper
-from lib.libraries import library_factory, LibraryNotSupported  # noqa: F401
+from lib.libraries import (cli_library_factory,  # noqa: F401
+                           LibraryNotSupported,
+                           LibraryPageNotValid)
 from lib.automata import BrowserUnavailable
 from lib.gdocs import get_service_client, write_rows_to_worksheet
 from lib.xls import make_xls
@@ -28,7 +31,7 @@ class LibraryScraper:
         self.library_id = library_id
         self.profile_name = profile_name
         self.refresh = refresh
-        self.library_factory = library_factory(library_id)
+        self.library_factory = cli_library_factory(library_id)
         self.config = Config()
 
         # Authenticate to Google if auth data is available.
@@ -93,23 +96,23 @@ class LibraryScraper:
             CLIShelfScraper(profile_name=self.profile_name,
                             shelf_name=self.shelf_name).run()
 
-        # Fetch books status from library.
+        # Fetch books info from library.
         try:
-            books_status = self.fetch_books_status()
+            books_info = self.fetch_books_info()
         except (BrowserUnavailable, BooksListUnavailable) as e:
-            self.logger.error(f'Feching books status failed: {e}')
+            self.logger.error(f'Feching books info failed: {e}')
             return
 
-        if not books_status:
+        if not books_info:
             self.logger.info(f'No books from list available.')
             return
 
-        # Write books status locally or in Google drive.
-        self.write_books_status(books_status)
+        # Write books info locally or in Google drive.
+        self.write_books_info(books_info)
 
-    def fetch_books_status(self):
+    def fetch_books_info(self):
         shelf_books = self.shelf_books
-        self.logger.info(f'Fetching {len(shelf_books)} books library status')
+        self.logger.info(f'Fetching {len(shelf_books)} books library info')
 
         # Split shelf books into batches for worker nodes.
         step_size = math.ceil(len(shelf_books) / self.nodes)
@@ -117,16 +120,23 @@ class LibraryScraper:
                                 for i in range(0, len(shelf_books), step_size)]
         self.logger.debug(f'Built {len(shelf_books_per_node)} batches for nodes')
 
+        # Fetch status using worker nodes.
         with concurrent.futures.ThreadPoolExecutor(max_workers=self.nodes) as executor:
-            books_status_from_nodes = executor.map(self.fetch_books_status_using_node,
-                                                   shelf_books_per_node)
-        return [
-            book_status
-            for books_status_batch in books_status_from_nodes
-            for book_status in books_status_batch
+            books_info_from_nodes = executor.map(self.fetch_books_info_using_node,
+                                                 shelf_books_per_node)
+        # Join results from nodes into a single list.
+        books_info = [
+            book_info
+            for books_info_batch in books_info_from_nodes
+            for book_info in books_info_batch
         ]
 
-    def fetch_books_status_using_node(self, shelf_books_for_node):
+        # Sort books by deparment and section.
+        books_info.sort(key=itemgetter('department', 'section'))
+
+        return books_info
+
+    def fetch_books_info_using_node(self, shelf_books_for_node):
         # Work, work?
         if not shelf_books_for_node:
             return
@@ -134,46 +144,46 @@ class LibraryScraper:
         # Get library instance.
         library = self.library_factory(books=shelf_books_for_node)
 
-        # Fetch books status
+        # Fetch books info
         return library.run()
 
-    def write_books_status(self, books_status):
+    def write_books_info(self, books_info):
         if self.google_client:
-            self.write_books_status_to_google_drive(books_status)
+            self.write_books_info_to_google_drive(books_info)
         else:
-            self.write_books_status_to_xls(books_status)
+            self.write_books_info_to_xls(books_info)
 
-    def write_books_status_to_google_drive(self, books_status):
+    def write_books_info_to_google_drive(self, books_info):
         # Convert books info to spreadsheet rows.
         worksheet_headers = self.config['library_scraper'].getstruct('worksheet_headers')
         rows = [[book[header] for header in worksheet_headers]
-                for book in books_status]
+                for book in books_info]
 
         # Get workbook and worksheet title.
         workbook_title = self.config['library_scraper']['workbook_title']
         worksheet_title = f'{self.shelf_name} {datetime.date.today()}'
 
-        self.logger.info('Writing books status to Google Drive')
+        self.logger.info('Writing books info to Google Drive')
         write_rows_to_worksheet(
             client=self.google_client,
             workbook_title=workbook_title,
             worksheet_title=worksheet_title,
             rows=rows,
         )
-        self.logger.info('Books status written to Google Drive')
+        self.logger.info('Books info written to Google Drive')
 
-    def write_books_status_to_xls(self, books_status):
+    def write_books_info_to_xls(self, books_info):
         worksheet_headers = self.config['library_scraper'].getstruct('worksheet_headers')
         worksheet_name = f'{datetime.date.today()}'
 
-        self.logger.info('Writing books status to XLS file')
+        self.logger.info('Writing books info to XLS file')
         make_xls(
             file_name=self.shelf_name,
             worksheet_name=worksheet_name,
             worksheet_headers=worksheet_headers,
-            rows=books_status,
+            rows=books_info,
         )
-        self.logger.info(f'Books status written to XLS file')
+        self.logger.info(f'Books info written to XLS file')
 
 
 class CLILibraryScraper(LibraryScraper):

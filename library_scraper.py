@@ -3,6 +3,7 @@ import logging
 import logging.config
 from lib.library_scraper import (CLILibraryScraper,
                                  LibraryNotSupported,
+                                 LibraryPageNotValid,
                                  LibraryNotConfigured,
                                  BooksListUnavailable)
 from lib.common import get_file_path
@@ -30,7 +31,8 @@ def run(context, library_id, profile_name, auth_data, refresh):
                           profile_name=profile_name,
                           auth_data=auth_data,
                           refresh=refresh).run()
-    except (LibraryNotSupported, LibraryNotConfigured, BooksListUnavailable) as e:
+    except (LibraryNotSupported, LibraryPageNotValid,
+            LibraryNotConfigured, BooksListUnavailable) as e:
         click.echo(e, color=context.color)
 
 
