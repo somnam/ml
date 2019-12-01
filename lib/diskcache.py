@@ -21,7 +21,7 @@ def diskcache(argument=None, *args, **kwargs):
 
 
 def diskcache_decorator(function, invalidate_time=None, db_name='./var/diskcache.db'):
-    connector = SQLiteConnector.instance(db_name, inspect.getfile(function))
+    connector = SQLiteConnector(db_name, inspect.getfile(function))
 
     @wraps(function)
     def diskcache_wrapper(*args, **kwargs):
@@ -44,14 +44,6 @@ def diskcache_decorator(function, invalidate_time=None, db_name='./var/diskcache
 
 
 class SQLiteConnector:
-    __instance = None
-
-    @classmethod
-    def instance(cls, db_name, file_name):
-        if not cls.__instance:
-            cls.__instance = cls(db_name, file_name)
-        return cls.__instance
-
     def __init__(self, db_name, file_name):
         self.connection = sqlite3.connect(db_name, check_same_thread=False)
         # Index result rows as dictionaries.
