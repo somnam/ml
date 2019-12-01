@@ -1,3 +1,4 @@
+import os
 from contextlib import contextmanager
 from bs4 import BeautifulSoup
 
@@ -10,3 +11,7 @@ def bs4_scope(markup):
         yield parsed_markup
     finally:
         parsed_markup.decompose()
+
+
+def get_file_path(*file_name):
+    return os.path.join(os.getcwd(), *file_name)

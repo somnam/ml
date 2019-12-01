@@ -1,7 +1,7 @@
 import json
 import logging
 from configparser import ConfigParser
-from lib.common import get_file_path
+from lib.utils import get_file_path
 
 
 class Config:

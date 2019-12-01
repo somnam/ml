@@ -12,7 +12,7 @@ from lib.libraries import (cli_library_factory,  # noqa: F401
 from lib.automata import BrowserUnavailable
 from lib.gdocs import get_service_client, write_rows_to_worksheet
 from lib.xls import make_xls
-from lib.common import get_file_path
+from lib.utils import get_file_path
 from lib.config import Config
 
 

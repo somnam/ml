@@ -1,7 +1,7 @@
 import click
 import logging.config
 from lib.shelf_scraper import CLIShelfScraper
-from lib.common import get_file_path
+from lib.utils import get_file_path
 
 logging.config.fileConfig(get_file_path('etc', 'config.ini'))
 

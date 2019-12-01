@@ -6,7 +6,7 @@ from lib.library_scraper import (CLILibraryScraper,
                                  LibraryPageNotValid,
                                  LibraryNotConfigured,
                                  BooksListUnavailable)
-from lib.common import get_file_path
+from lib.utils import get_file_path
 from lib.config import Config
 
 logging.config.fileConfig(get_file_path('etc', 'config.ini'))

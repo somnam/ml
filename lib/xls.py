@@ -3,7 +3,7 @@ import re
 from openpyxl import Workbook, load_workbook
 from openpyxl.utils import get_column_letter
 from openpyxl.utils.exceptions import InvalidFileException
-from lib.common import get_file_path
+from lib.utils import get_file_path
 # }}}
 
 

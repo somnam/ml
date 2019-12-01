@@ -11,7 +11,7 @@ from multiprocessing.dummy import Pool, Lock
 from lib.diskcache import diskcache, MONTH
 from lib.utils import bs4_scope
 from lib.config import Config
-from lib.common import get_file_path
+from lib.utils import get_file_path
 
 
 class LoginError(Exception):

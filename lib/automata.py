@@ -2,7 +2,7 @@
 import logging
 import urllib3
 from lib.config import Config
-from lib.common import get_file_path
+from lib.utils import get_file_path
 from selenium import webdriver
 from selenium.common.exceptions import TimeoutException, NoSuchElementException
 from selenium.webdriver.common.by import By
