@@ -21,7 +21,3 @@ def run(context, profile_name, shelf_name, include_price):
     CLIShelfScraper(profile_name=profile_name,
                     shelf_name=shelf_name,
                     include_price=include_price).run()
-
-
-if __name__ == '__main__':
-    run()

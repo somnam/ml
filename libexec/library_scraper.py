@@ -34,7 +34,3 @@ def run(context, library_id, profile_name, auth_data, refresh):
     except (LibraryNotSupported, LibraryPageNotValid,
             LibraryNotConfigured, BooksListUnavailable) as e:
         click.echo(e, color=context.color)
-
-
-if __name__ == '__main__':
-    run()
