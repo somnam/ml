@@ -1,6 +1,7 @@
 # Import {{{
 import logging
 import urllib3
+from os import path
 from lib.config import Config
 from lib.utils import get_file_path
 from selenium import webdriver
@@ -149,7 +150,8 @@ class FirefoxBrowser(Browser):
             options.profile.set_preference(preference, False)
 
         return {
-            'executable_path': get_file_path('bin/geckodriver'),
+            'executable_path': path.join(path.expanduser('~'),
+                                         '.local', 'bin', 'geckodriver'),
             'service_log_path': get_file_path('var/log/geckodriver.log'),
             'options': options,
         }

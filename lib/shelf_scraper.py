@@ -4,12 +4,11 @@ import logging
 import requests
 from json import JSONDecodeError
 from urllib.parse import urlparse
-from progress.bar import Bar
 from requests.exceptions import HTTPError, ConnectionError
 from multiprocessing import cpu_count
 from multiprocessing.dummy import Pool, Lock
 from lib.diskcache import diskcache, MONTH
-from lib.utils import bs4_scope
+from lib.utils import bs4_scope, ProgressBar
 from lib.config import Config
 from lib.utils import get_file_path
 
@@ -412,7 +411,7 @@ class CLIShelfScraper(ShelfScraper):
 
     def get_shelf_book_urls(self, shelf):
         bar_title = f'Collecting shelf pages'
-        with Bar(bar_title, max=shelf["pager_count"]) as self.bar:
+        with ProgressBar(bar_title, max=shelf["pager_count"]) as self.bar:
             shelf_book_urls = super().get_shelf_book_urls(shelf)
         return shelf_book_urls
 
@@ -424,7 +423,7 @@ class CLIShelfScraper(ShelfScraper):
 
     def get_books_from_urls(self, shelf_book_urls):
         bar_title = f'Collecting  books'
-        with Bar(bar_title, max=len(shelf_book_urls)) as self.bar:
+        with ProgressBar(bar_title, max=len(shelf_book_urls)) as self.bar:
             shelf_books = super().get_books_from_urls(shelf_book_urls)
         return shelf_books
 
@@ -436,7 +435,7 @@ class CLIShelfScraper(ShelfScraper):
 
     def set_book_prices(self, shelf_books):
         bar_title = f'Collecting book prices'
-        with Bar(bar_title, max=len(shelf_books)) as self.bar:
+        with ProgressBar(bar_title, max=len(shelf_books)) as self.bar:
             super().set_book_prices(shelf_books)
 
     def set_book_price(self, book):
