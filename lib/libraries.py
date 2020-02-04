@@ -8,7 +8,7 @@ from lib.diskcache import diskcache, DAY
 from lib.automata import FirefoxBrowser
 from lib.config import Config
 from lib.utils import bs4_scope
-from selenium.common.exceptions import NoSuchElementException
+from selenium.common.exceptions import NoSuchElementException, WebDriverException
 from selenium.webdriver.common.keys import Keys
 # }}}
 
@@ -289,7 +289,7 @@ class Library4949(LibraryBase):  # {{{
                 link.get_attribute('href') for link in
                 self.browser.find_elements_by_css_selector('div.zawartosc ul a')
             ]
-        except NoSuchElementException:
+        except (NoSuchElementException, WebDriverException):
             return []
 
     def get_matching_results_by_title(self, book, results):
@@ -357,7 +357,7 @@ class Library5004(LibraryBase):  # {{{
         try:
             search_button = '.btn.search-main-btn'
             self.browser.wait_is_visible_by_css_selector(search_button)
-        except NoSuchElementException:
+        except (NoSuchElementException, WebDriverException):
             pass
 
         book_info = super().get_book_info(book)
@@ -366,7 +366,7 @@ class Library5004(LibraryBase):  # {{{
         try:
             main_page_selector = 'h1.library_title-pages > a'
             self.browser.find_element_by_css_selector(main_page_selector).click()
-        except NoSuchElementException:
+        except (NoSuchElementException, WebDriverException):
             pass
 
         return book_info
