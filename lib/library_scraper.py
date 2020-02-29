@@ -14,14 +14,7 @@ from lib.gdocs import get_service_client, write_rows_to_worksheet
 from lib.xls import make_xls
 from lib.utils import get_file_path
 from lib.config import Config
-
-
-class LibraryNotConfigured(Exception):
-    pass
-
-
-class BooksListUnavailable(Exception):
-    pass
+from lib.exceptions import LibraryNotConfigured, BooksListUnavailable
 
 
 class LibraryScraper:

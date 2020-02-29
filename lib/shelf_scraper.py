@@ -11,22 +11,7 @@ from lib.diskcache import diskcache, MONTH
 from lib.utils import bs4_scope, ProgressBar
 from lib.config import Config
 from lib.utils import get_file_path
-
-
-class LoginError(Exception):
-    pass
-
-
-class ProfileNotFoundError(Exception):
-    pass
-
-
-class ShelvesScrapeError(Exception):
-    pass
-
-
-class BooksCollectError(Exception):
-    pass
+from lib.exceptions import ProfileNotFoundError, ShelvesScrapeError, BooksCollectError
 
 
 class ShelfScraper:

@@ -1,20 +1,22 @@
 import json
 import logging
-from configparser import ConfigParser
-from lib.utils import get_file_path
+from configparser import ConfigParser, ExtendedInterpolation
+from lib.utils import get_file_path, Singleton
 
 
-class Config:
+class Config(Singleton, ConfigParser):
     logger = logging.getLogger(__name__)
 
     def __init__(self):
-        self.config = ConfigParser(
+        super().__init__(
             converters={'struct': self.struct_converter},
+            interpolation=ExtendedInterpolation(),
         )
+
         # Don't lowercase keys.
-        self.config.optionxform = str
+        self.optionxform = str
         # Read config file
-        self.config.read(get_file_path('etc', 'config.ini'))
+        self.read(get_file_path('etc', 'config.ini'))
 
     @staticmethod
     def struct_converter(value):
@@ -24,9 +26,3 @@ class Config:
             Config.logger.error(f'Could not decode value "{value}": {e}')
             decoded_value = None
         return decoded_value
-
-    def __contains__(self, section):
-        return section in self.config
-
-    def __getitem__(self, section):
-        return self.config[section] if section in self.config else None

@@ -4,16 +4,13 @@ import urllib3
 from os import path
 from lib.config import Config
 from lib.utils import get_file_path
+from lib.exceptions import BrowserUnavailable
 from selenium import webdriver
 from selenium.common.exceptions import TimeoutException, NoSuchElementException
 from selenium.webdriver.common.by import By
 from selenium.webdriver.support import expected_conditions
 from selenium.webdriver.support.ui import Select, WebDriverWait
 # }}}
-
-
-class BrowserUnavailable(Exception):
-    pass
 
 
 class Browser:

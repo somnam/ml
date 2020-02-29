@@ -8,17 +8,11 @@ from lib.diskcache import diskcache, DAY
 from lib.automata import FirefoxBrowser
 from lib.config import Config
 from lib.utils import bs4_scope
-from selenium.common.exceptions import NoSuchElementException, WebDriverException
+from lib.exceptions import BrowserUnavailable, LibraryNotSupported, LibraryPageNotValid
+from selenium.common.exceptions import (NoSuchElementException, WebDriverException,
+                                        NoSuchWindowException)
 from selenium.webdriver.common.keys import Keys
 # }}}
-
-
-class LibraryNotSupported(Exception):
-    pass
-
-
-class LibraryPageNotValid(Exception):
-    pass
 
 
 def library_factory(library_id):
@@ -57,7 +51,10 @@ class LibraryBase:  # {{{
             # Open requested library page.
             self.open_library_page()
             # Fetch all books info.
-            books_info = self.get_books_info()
+            try:
+                books_info = self.get_books_info()
+            except NoSuchWindowException as e:
+                raise BrowserUnavailable(str(e))
 
         return books_info
 
@@ -106,7 +103,11 @@ class LibraryBase:  # {{{
             search_field = search_fields.pop(0)
 
             # Fetch book info.
-            book_info = self.query_book_info(book, search_field)
+            try:
+                book_info = self.query_book_info(book, search_field)
+            except WebDriverException as e:
+                self.logger.error(f'Web Driver error: {e!s}')
+                continue
 
             # Book was found as available or unavailable.
             if book_info is not None:
