@@ -1,11 +1,11 @@
 import click
 import logging
 import logging.config
-from lib.library_scraper import (CLILibraryScraper,
-                                 LibraryNotSupported,
-                                 LibraryPageNotValid,
-                                 LibraryNotConfigured,
-                                 BooksListUnavailable)
+from lib.library_scraper import CLILibraryScraper
+from lib.exceptions import (LibraryNotSupported,
+                            LibraryPageNotValid,
+                            LibraryNotConfigured,
+                            BooksListUnavailable)
 from lib.utils import get_file_path
 from lib.config import Config
 
