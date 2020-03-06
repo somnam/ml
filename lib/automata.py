@@ -1,6 +1,7 @@
 # Import {{{
 import logging
 import urllib3
+from urllib3.exceptions import MaxRetryError
 from os import path
 from lib.config import Config
 from lib.utils import get_file_path
@@ -35,7 +36,7 @@ class Browser:
 
         try:
             browser = driver(**options)
-        except urllib3.exceptions.MaxRetryError as e:
+        except (MaxRetryError, TimeoutException) as e:
             raise BrowserUnavailable(e)
 
         return browser
