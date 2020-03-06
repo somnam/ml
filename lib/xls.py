@@ -1,10 +1,13 @@
 # Import {{{
 import re
+import logging
 from openpyxl import Workbook, load_workbook
 from openpyxl.utils import get_column_letter
 from openpyxl.utils.exceptions import InvalidFileException
 from lib.utils import get_file_path
 # }}}
+
+logger = logging.getLogger(__name__)
 
 
 def make_xls(file_name, worksheet_name, worksheet_headers, rows):
@@ -46,7 +49,10 @@ def make_xls(file_name, worksheet_name, worksheet_headers, rows):
 
             sheet_row.append(row_value)
 
-        sheet.append(sheet_row)
+        try:
+            sheet.append(sheet_row)
+        except ValueError as e:
+            logger.error(f'Error appending row to sheet: {e}')
 
     # Set column dimensions.
     for index in range(len(worksheet_headers)):

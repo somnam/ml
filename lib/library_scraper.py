@@ -6,9 +6,7 @@ import datetime
 import concurrent.futures
 from operator import itemgetter
 from lib.shelf_scraper import CLIShelfScraper
-from lib.libraries import (cli_library_factory,  # noqa: F401
-                           LibraryNotSupported,
-                           LibraryPageNotValid)
+from lib.libraries import library_factory
 from lib.automata import BrowserUnavailable
 from lib.gdocs import get_service_client, write_rows_to_worksheet
 from lib.xls import make_xls
@@ -24,7 +22,7 @@ class LibraryScraper:
         self.library_id = library_id
         self.profile_name = profile_name
         self.refresh = refresh
-        self.library_factory = cli_library_factory(library_id)
+        self.library_factory = library_factory(library_id, self.logger.name)
         self.config = Config()
 
         # Authenticate to Google if auth data is available.
@@ -135,9 +133,11 @@ class LibraryScraper:
             return
 
         # Get library instance.
+        self.logger.debug(f'Creating library instance')
         library = self.library_factory(books=shelf_books_for_node)
 
         # Fetch books info
+        self.logger.debug(f'Running library search')
         return library.run()
 
     def write_books_info(self, books_info):

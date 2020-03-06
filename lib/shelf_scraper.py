@@ -5,9 +5,10 @@ import requests
 from json import JSONDecodeError
 from urllib.parse import urlparse
 from requests.exceptions import HTTPError, ConnectionError
+from datetime import datetime, timedelta
 from multiprocessing import cpu_count
 from multiprocessing.dummy import Pool, Lock
-from lib.diskcache import diskcache, MONTH
+from lib.db import BookShelfInfoModel, Handler
 from lib.utils import bs4_scope, ProgressBar
 from lib.config import Config
 from lib.utils import get_file_path
@@ -23,6 +24,13 @@ class ShelfScraper:
         self.include_price = include_price
 
         self.config = Config()['shelf_scraper']
+        self.isbn_sub_re = re.compile(r'\D+')
+
+        invalidate_days = self.config.getint('invalidate_days', fallback=30)
+        self.invalidate_date = datetime.utcnow() - timedelta(days=invalidate_days)
+
+        self.handler = Handler()
+        self.handler.create_all()
 
         self.profile_id = None
         self.shelves = None
@@ -242,75 +250,93 @@ class ShelfScraper:
         return shelf_books
 
     def get_book_info(self, book_url):
-        # Invalidate book info after 30 days.
-        @diskcache(MONTH)
-        def get_book_info_wraped(book_url):
-            try:
-                response = self.session.get(book_url)
-                response.raise_for_status()
-                with bs4_scope(response.content) as book_page:
-                    # Get title and author.
-                    title = book_page.select_one(
-                        'div.title-container'
-                    )['data-title']
-                    author = book_page.select_one(
-                        'span.author > a.link-name'
-                    ).text.strip()
+        # Check if current book info exists in DB.
+        with self.handler.session_scope() as session:
+            book_info = session.query(BookShelfInfoModel.book_info).filter(
+                BookShelfInfoModel.url_md5 == BookShelfInfoModel.md5_from_url(book_url),
+                BookShelfInfoModel.created >= self.invalidate_date,
+            ).scalar()
 
-                    # Search for subtitle in title.
-                    subtitle = None
-                    if '.' in title:
-                        title, subtitle = title.split('.', maxsplit=1)
-
-                    # Get details element.
-                    book_details = book_page.select_one('div#book-details')
-
-                    # Get original title.
-                    original_title_tag = book_details.select_one(
-                        'dt:contains("Tytuł oryginału") + dd'
-                    )
-                    original_title = (original_title_tag.text.strip()
-                                      if original_title_tag else None)
-
-                    # Get pages count.
-                    pages_count_tag = book_details.select_one(
-                        'dt:contains("Liczba stron") + dd'
-                    )
-                    pages_count = (pages_count_tag.text.strip()
-                                   if pages_count_tag else None)
-
-                    # Get category.
-                    category = book_page.select_one('a.book__category').text.strip()
-
-                    # Get release date.
-                    release_tag = book_details.select_one(
-                        'dt:contains("Data wydania") + dd'
-                    )
-                    release = (release_tag.text.strip() if release_tag else None)
-
-                    # Get book ISBN. ISBN is not always present.
-                    isbn_tag = book_details.select_one(
-                        'dt:contains("ISBN") + dd'
-                    )
-                    isbn = (isbn_tag.text.strip() if isbn_tag else None)
-
-                    book_info = {
-                        'title': title,
-                        'subtitle': subtitle,
-                        'original_title': original_title,
-                        'author': author,
-                        'category': category,
-                        'pages': pages_count,
-                        'url': book_url,
-                        'isbn': isbn,
-                        'release': release,
-                    }
-            except (HTTPError, JSONDecodeError) as e:
-                raise BooksCollectError(f'HTML request error: {e}')
-
+        if book_info:
             return book_info
 
-        return get_book_info_wraped(book_url)
+        book_info = self.get_book_info_by_url(book_url)
+        with self.handler.session_scope() as session:
+            session.query(BookShelfInfoModel).filter(
+                BookShelfInfoModel.url_md5 == BookShelfInfoModel.md5_from_url(book_url),
+            ).delete()
+            session.add(BookShelfInfoModel(
+                url_md5=BookShelfInfoModel.md5_from_url(book_url),
+                book_info=book_info,
+            ))
+
+        return book_info
+
+    def get_book_info_by_url(self, book_url):
+        try:
+            response = self.session.get(book_url)
+            response.raise_for_status()
+            with bs4_scope(response.content) as book_page:
+                # Get title and author.
+                title = book_page.select_one(
+                    'div.title-container'
+                )['data-title']
+                author = book_page.select_one(
+                    'span.author > a.link-name'
+                ).text.strip()
+
+                # Search for subtitle in title.
+                subtitle = None
+                if '.' in title:
+                    title, subtitle = title.split('.', maxsplit=1)
+
+                # Get details element.
+                book_details = book_page.select_one('div#book-details')
+
+                # Get original title.
+                original_title_tag = book_details.select_one(
+                    'dt:contains("Tytuł oryginału") + dd'
+                )
+                original_title = (original_title_tag.text.strip()
+                                  if original_title_tag else None)
+
+                # Get pages count.
+                pages_count_tag = book_details.select_one(
+                    'dt:contains("Liczba stron") + dd'
+                )
+                pages_count = (pages_count_tag.text.strip()
+                               if pages_count_tag else None)
+
+                # Get category.
+                category = book_page.select_one('a.book__category').text.strip()
+
+                # Get release date.
+                release_tag = book_details.select_one(
+                    'dt:contains("Data wydania") + dd'
+                )
+                release = (release_tag.text.strip() if release_tag else None)
+
+                # Get book ISBN. ISBN is not always present.
+                isbn_tag = book_details.select_one(
+                    'dt:contains("ISBN") + dd'
+                )
+                isbn = (self.isbn_sub_re.sub('', isbn_tag.text) if isbn_tag else None)
+
+                book_info = {
+                    'title': title,
+                    'subtitle': subtitle,
+                    'original_title': original_title,
+                    'author': author,
+                    'category': category,
+                    'pages': pages_count,
+                    'url': book_url,
+                    'isbn': isbn,
+                    'release': release,
+                }
+        except (HTTPError, JSONDecodeError) as e:
+            raise BooksCollectError(f'HTML request error: {e}')
+
+        return book_info
 
     def set_book_prices(self, shelf_books):
         self.pool.map(self.set_book_price, shelf_books)

@@ -17,7 +17,7 @@ check_dependencies ()
 
 build_docker_image ()
 {
-    echo -e "\e[36mBuilding docker image\e[0m"
+    echo -e "\e[36mBuilding docker image (this may take some time).\e[0m"
 
     local self_path=$(dirname "$0")
     local root_path=$(dirname "$self_path")

@@ -4,47 +4,45 @@ import sys
 import json
 import logging
 import requests
-from lib.diskcache import diskcache, DAY
+from datetime import datetime, timedelta
+from lib.db import BookLibraryAvailabilityModel, Handler
 from lib.automata import FirefoxBrowser
 from lib.config import Config
 from lib.utils import bs4_scope
 from lib.exceptions import BrowserUnavailable, LibraryNotSupported, LibraryPageNotValid
 from selenium.common.exceptions import (NoSuchElementException, WebDriverException,
-                                        NoSuchWindowException)
+                                        NoSuchWindowException, TimeoutException)
 from selenium.webdriver.common.keys import Keys
 # }}}
 
 
-def library_factory(library_id):
+def library_factory(library_id, logger=None):
     try:
-        return getattr(sys.modules.get(__name__), f'Library{library_id}')
+        library = getattr(sys.modules.get(__name__), f'Library{library_id}')
+        if logger:
+            setattr(library, 'logger', logging.getLogger(logger))
     except AttributeError:
         raise LibraryNotSupported(f'Library with id {library_id} not supported')
-
-
-def cli_library_factory(*args, **kwargs):
-    library = library_factory(*args, **kwargs)
-    setattr(library, 'logger', logging.getLogger('script'))
     return library
 
 
 class LibraryBase:  # {{{
-    config = None
     logger = logging.getLogger(__name__)
 
-    def __init__(self, books):
-        super().__init__()
+    def __init__(self, library_id, search_fields, books):
         self.books = books
+        self.config = Config()[f'libraries:{library_id}']
+        self.search_fields = search_fields
+        self.isbn_sub_re = re.compile(r'\D+')
+
+        invalidate_days = self.config.getint('invalidate_days', fallback=1)
+        self.invalidate_date = datetime.utcnow() - timedelta(days=invalidate_days)
+
+        self.handler = Handler()
+        self.handler.create_all()
+
         self.session = None
         self.browser = None
-
-    @property
-    def books_by_uid(self):
-        if not hasattr(self, '_books_by_uid'):
-            # Use book uuid as cache key.
-            self._books_by_uid = {f'{self.config["id"]}:{book["isbn"]}': book
-                                  for book in self.books}
-        return self._books_by_uid
 
     def run(self):
         with FirefoxBrowser() as self.browser, requests.Session() as self.session:
@@ -52,11 +50,11 @@ class LibraryBase:  # {{{
             self.open_library_page()
             # Fetch all books info.
             try:
-                books_info = self.get_books_info()
-            except NoSuchWindowException as e:
+                books_availability = self.get_books_availability()
+            except (NoSuchWindowException, TimeoutException) as e:
                 raise BrowserUnavailable(str(e))
 
-        return books_info
+        return books_availability
 
     def open_library_page(self):
         # Open library page.
@@ -67,51 +65,65 @@ class LibraryBase:  # {{{
                 raise LibraryPageNotValid('Incorrect library page title:'
                                           f' {self.browser.title}')
 
-    def get_books_info(self):
-        # Allows to cache library info for given time.
-        cached_book_info_wrapper = self.cached_book_info_wrapper()
-
-        books_info = []
-        for book_uid, book in self.books_by_uid.items():
-            # Fetch book info.
-            book_info_json = cached_book_info_wrapper(book_uid)
+    def get_books_availability(self):
+        books_availability = []
+        for book in self.books:
+            book_availability = self.get_book_availability(book)
 
             # Don't append empty info.
-            if not book_info_json:
-                continue
+            if book_availability:
+                books_availability.append(book_availability)
 
-            try:
-                books_info.append(json.loads(book_info_json))
-            except json.JSONDecodeError as e:
-                self.logger.warning('Unable to decode status for book'
-                                    f' "{book["title"]}" by {book["author"]}: {e}')
+        return [entry
+                for book_availability in books_availability
+                for entry in book_availability]
 
-        return [info for entry in books_info for info in entry]
+    def get_book_availability(self, book):
+        book_md5 = BookLibraryAvailabilityModel.md5_from_book(book)
+        with self.handler.session_scope() as session:
+            book_availability = session.query(BookLibraryAvailabilityModel.search_results)\
+                .filter(BookLibraryAvailabilityModel.library_id == self.config["id"],
+                        BookLibraryAvailabilityModel.book_md5 == book_md5,
+                        BookLibraryAvailabilityModel.created >= self.invalidate_date)\
+                .one_or_none()
 
-    def cached_book_info_wrapper(self):
-        # Cache book info for 24h.
-        @diskcache(DAY)
-        def get_cached_book_info(book_uid):
-            return self.get_book_info(self.books_by_uid[book_uid])
-        return get_cached_book_info
+        if book_availability:
+            return book_availability.search_results
 
-    def get_book_info(self, book):
+        search_results = self.search_for_book(book)
+        with self.handler.session_scope() as session:
+            session.query(BookLibraryAvailabilityModel).filter(
+                BookLibraryAvailabilityModel.library_id == self.config["id"],
+                BookLibraryAvailabilityModel.book_md5 == book_md5,
+            ).delete()
+            session.add(BookLibraryAvailabilityModel(
+                library_id=self.config['id'],
+                book_md5=BookLibraryAvailabilityModel.md5_from_book(book),
+                search_results=search_results,
+            ))
+
+        return search_results
+
+    def search_for_book(self, book):
         # Search fields are used to retry fetching book info.
         search_fields = self.search_fields[:]
+        search_results = None
         while search_fields:
             # Search first by isbn, then by title.
             search_field = search_fields.pop(0)
 
             # Fetch book info.
             try:
-                book_info = self.query_book_info(book, search_field)
+                search_results = self.search_for_book_by_field(book, search_field)
             except WebDriverException as e:
                 self.logger.error(f'Web Driver error: {e!s}')
                 continue
 
             # Book was found as available or unavailable.
-            if book_info is not None:
-                book_info = self.process_book_info(book, book_info)
+            if search_results is not None:
+                search_results = self.process_search_results(
+                    book, search_results
+                )
                 break
             # Any fields to search by remain?
             elif search_fields:
@@ -121,23 +133,25 @@ class LibraryBase:  # {{{
             else:
                 self.logger.info(f'Book "{book["title"]}" by {book["author"]}'
                                  ' not found.')
-                book_info = None
+        return search_results
 
-        return book_info
-
-    def query_book_info(self, book, search_field):
+    def search_for_book_by_field(self, book, search_field):
         # Query book and fetch results.
-        query_results = self.query_book(book, search_field)
-        query_match = self.get_matching_results(book, search_field, query_results)
-        book_info = self.extract_book_info(book, query_match)
+        search_form_results = self.submit_search_form(
+            book, search_field
+        )
+        matching_search_form_results = self.find_matching_search_form_results(
+            book, search_field, search_form_results
+        )
+        return self.scrape_search_results(
+            book, matching_search_form_results
+        )
 
-        return book_info
-
-    def process_book_info(self, book, book_info):
+    def process_search_results(self, book, search_results):
         # Book info:
         # None - book wasn't found, search by other criteria
         # []   - book was found but is unavailable, end search
-        is_unavailable = book_info is not None and not book_info
+        is_unavailable = search_results is not None and not search_results
         if is_unavailable:
             self.logger.warning(f'Book "{book["title"]}" by {book["author"]}'
                                 ' not available.')
@@ -147,39 +161,44 @@ class LibraryBase:  # {{{
         self.logger.info(f'Successfully queried "{book["title"]}"'
                          f' by {book["author"]} info.')
         # Return info in json format.
-        return json.dumps([{
+        return [{
             "author": book["author"],
-            "title": f'"{book["title"]}"',
+            "title": book["title"],
             "department": entry[0],
             "section": entry[1],
             "pages": book["pages"],
             "link": book["url"],
-        } for entry in book_info])
+        } for entry in search_results]
 
-    def query_book(self, book, search_field):
+    def submit_search_form(self, book, search_field):
         raise NotImplementedError()
 
-    def get_matching_results(self, book, search_field):
+    def find_matching_search_form_results(self, book, search_field):
         raise NotImplementedError()
 
-    def extract_book_info(self, book, results):
+    def scrape_search_results(self, book, results):
         raise NotImplementedError()
 # }}}
 
 
 class Library4949(LibraryBase):  # {{{
-    config = Config()['libraries:4949']
-    search_fields = ['isbn', 'title']
+    def __init__(self, books):
+        super().__init__(
+            library_id=4949,
+            search_fields=['isbn', 'title'],
+            books=books,
+        )
 
-    def query_book(self, book, search_field):
+    def submit_search_form(self, book, search_field):
+        # Check if book contains given search field.
         if not book.get(search_field):
             return
 
-        return (self.query_book_by_isbn(book)
+        return (self.submit_search_form_using_isbn(book)
                 if search_field == 'isbn'
-                else self.query_book_by_title(book))
+                else self.submit_search_form_using_title(book))
 
-    def query_book_by_isbn(self, book):
+    def submit_search_form_using_isbn(self, book):
         # Select standard form.
         self.select_search_form('indeks')
 
@@ -214,7 +233,7 @@ class Library4949(LibraryBase):  # {{{
         # Return search results.
         return results
 
-    def query_book_by_title(self, book):
+    def submit_search_form_using_title(self, book):
         # Select advanced form.
         self.select_search_form('zaawansowane')
 
@@ -264,19 +283,18 @@ class Library4949(LibraryBase):  # {{{
             text_field.send_keys(Keys.ESCAPE)
             self.browser.wait_is_not_visible_by_id(autocomp_popup_id)
 
-    def get_matching_results(self, book, search_field, results):
+    def find_matching_search_form_results(self, book, search_field, results):
         if not results:
             return
 
-        return (self.get_matching_results_by_isbn(book, results)
+        return (self.find_matching_search_form_results_by_isbn(book, results)
                 if search_field == 'isbn'
-                else self.get_matching_results_by_title(book, results))
+                else self.find_matching_search_form_results_by_title(book, results))
 
-    def get_matching_results_by_isbn(self, book, results):
+    def find_matching_search_form_results_by_isbn(self, book, results):
         # Match result using isbn value.
-        isbn_value = book['isbn'].replace('-', '')
         isbn_result = next((result for result in results
-                            if re.sub(r'\D+', '', result.text) == isbn_value),
+                            if self.isbn_sub_re.sub('', result.text) == book['isbn']),
                            None)
         # No match found - empty results list.
         if not isbn_result:
@@ -293,20 +311,20 @@ class Library4949(LibraryBase):  # {{{
         except (NoSuchElementException, WebDriverException):
             return []
 
-    def get_matching_results_by_title(self, book, results):
+    def find_matching_search_form_results_by_title(self, book, results):
         matching = []
         for elem in results:
             book_id = elem.get_attribute('id').replace('dvop', '')
             matching.append(f'{self.config["book_url"]}{book_id}')
         return matching
 
-    def extract_book_info(self, book, results):
+    def scrape_search_results(self, book, results):
         if not results:
             return
 
         accepted_locations = self.config.getstruct('accepted_locations')
 
-        book_info = []
+        search_results = []
         for book_url in results:
             try:
                 response = self.session.get(book_url)
@@ -343,17 +361,21 @@ class Library4949(LibraryBase):  # {{{
                     section_match = re.search(r'\s\(\s(.+)\s\)\s', section_info.text)
                     section = section_match.group(1) if section_match else ''
 
-                    book_info.append((department, section))
+                    search_results.append((department, section))
 
-        return book_info
+        return search_results
 # }}}
 
 
 class Library5004(LibraryBase):  # {{{
-    config = Config()['libraries:5004']
-    search_fields = ['title_and_author']
+    def __init__(self, books):
+        super().__init__(
+            library_id=5004,
+            search_fields=['title_and_author'],
+            books=books,
+        )
 
-    def get_book_info(self, book):
+    def get_book_availability(self, book):
         # Wait for submit button to be visible.
         try:
             search_button = '.btn.search-main-btn'
@@ -361,7 +383,7 @@ class Library5004(LibraryBase):  # {{{
         except (NoSuchElementException, WebDriverException):
             pass
 
-        book_info = super().get_book_info(book)
+        book_availability = super().get_book_availability(book)
 
         # Reopen search form page.
         try:
@@ -370,7 +392,7 @@ class Library5004(LibraryBase):  # {{{
         except (NoSuchElementException, WebDriverException):
             pass
 
-        return book_info
+        return book_availability
 
     def set_search_value(self, search_value):
         # Input search value.
@@ -381,7 +403,7 @@ class Library5004(LibraryBase):  # {{{
             return True
         return False
 
-    def query_book(self, book, search_field):
+    def submit_search_form(self, book, search_field):
         # Search field didn't load - can't run query.
         search_value = '"{0}" AND "{1}"'.format(book['title'], book['author'])
         if not self.set_search_value(search_value):
@@ -410,7 +432,7 @@ class Library5004(LibraryBase):  # {{{
             results = self.browser.find_elements_by_css_selector('dl.dl-horizontal')
         return results
 
-    def get_matching_results(self, book, search_field, results):
+    def find_matching_search_form_results(self, book, search_field, results):
         if not results:
             return
 
@@ -422,11 +444,11 @@ class Library5004(LibraryBase):  # {{{
 
         return matching
 
-    def extract_book_info(self, book, results):
+    def scrape_search_results(self, book, results):
         if not results:
             return
 
-        book_info = None
+        search_result = None
         for book_url in results:
             try:
                 response = self.session.get(book_url)
@@ -442,18 +464,18 @@ class Library5004(LibraryBase):  # {{{
                 if not(items_list and yii_token):
                     continue
 
-                book_info = self.extract_single_book_info(
+                search_result = self.scrape_first_search_result(
                     yii_token=yii_token,
                     items_list=items_list,
                 )
                 # All books are available in the same section.
-                if book_info:
+                if search_result:
                     break
 
-        return [book_info] if book_info else None
+        return [search_result] if search_result else None
 
-    def extract_single_book_info(self, yii_token, items_list):
-        book_info = None
+    def scrape_first_search_result(self, yii_token, items_list):
+        search_result = None
         for item in items_list:
             # Check if book is available.
             is_book_available = self.get_book_accessibility(yii_token, item)
@@ -476,12 +498,12 @@ class Library5004(LibraryBase):  # {{{
                 continue
             # Get full section name.
             section = ' '.join(signature_values[1:])
-            book_info = (self.config['department'], section)
+            search_result = (self.config['department'], section)
 
             # All remaining available books will be in the same section.
             break
 
-        return book_info
+        return search_result
 
     def get_book_accessibility(self, yii_token, item):
         accessibility_url = '{0}/itemrequest/getiteminfomessage'.format(

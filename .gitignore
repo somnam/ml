@@ -9,6 +9,7 @@
 *.cache
 *.log
 *.db
+*.db-*
 *.ini
 *.pid
 

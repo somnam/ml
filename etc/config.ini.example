@@ -1,3 +1,15 @@
+[selenium]
+nodes = 4
+headless = True
+hub_url = selenium hub url
+
+
+[db]
+sqlalchemy.url = sqlite:////home/sandbox/ml/var/ml.db
+sqlalchemy.pool_pre_ping = true
+sqlalchemy.pool_recycle = 3600
+
+
 [shelf_scraper]
 lc_url = https://lubimyczytac.pl
 lc_login_url = https://lubimyczytac.pl/zaloguj/c
@@ -6,11 +18,8 @@ lc_profile_url = https://lubimyczytac.pl/profil
 lc_shelf_page_url = https://lubimyczytac.pl/profile/getLibraryBooksList
 bb_url = https://widget.getbuybox.com/v3/1/buybox.json
 retailers = []
+invalidate_days = 30
 
-[selenium]
-nodes = 5
-headless = True
-hub_url = selenium hub url
 
 [library_scraper]
 workbook_title = workbook title
@@ -24,6 +33,7 @@ book_url = http://185.43.138.133:8080/Opac5/faces/Opis.jsp?ido=
 title = Opac
 shelf_name = shelf name
 accepted_locations = []
+invalidate_days = 1
 
 [libraries:5004]
 id = 5004
@@ -34,6 +44,8 @@ shelf_name = shelf name
 department = department name
 accepted_locations = []
 accepted_status = accepted status
+invalidate_days = 1
+
 
 [loggers]
 keys = root, script
