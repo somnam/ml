@@ -97,6 +97,7 @@ class LibraryBase:  # {{{
 
     def get_book_info(self, book):
         # Search fields are used to retry fetching book info.
+        book_info = None
         search_fields = self.search_fields[:]
         while search_fields:
             # Search first by isbn, then by title.
@@ -121,7 +122,6 @@ class LibraryBase:  # {{{
             else:
                 self.logger.info(f'Book "{book["title"]}" by {book["author"]}'
                                  ' not found.')
-                book_info = None
 
         return book_info
 
