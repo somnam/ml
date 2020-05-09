@@ -7,11 +7,12 @@ from sqlalchemy.event import listens_for
 from sqlalchemy.engine import Engine
 from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy.orm import sessionmaker, scoped_session
-from sqlalchemy.exc import DBAPIError, SQLAlchemyError
+from sqlalchemy.exc import DBAPIError, SQLAlchemyError, InterfaceError, OperationalError
 from sqlalchemy.pool import StaticPool
 from contextlib import contextmanager
 from hashlib import md5
 from lib.config import Config
+from lib.exceptions import DatabaseError
 
 
 Model = declarative_base(
@@ -56,9 +57,9 @@ class Handler:
         try:
             yield session
             session.commit()
-        except (DBAPIError, SQLAlchemyError):
+        except (DBAPIError, SQLAlchemyError, InterfaceError, OperationalError):
             session.rollback()
-            raise
+            raise DatabaseError()
         finally:
             session.close()
 
@@ -81,13 +82,12 @@ class BookShelfInfoModel(Model):
     __tablename__ = 'book_shelf_info'
 
     url_md5 = Column(CHAR(32), primary_key=True)
-    book_info = Column(JsonType)
+    book_info = Column(JsonType, nullable=False)
     created = Column(DateTime, nullable=False, default=datetime.utcnow)
 
     @staticmethod
     def md5_from_url(url):
         return md5(url.encode('utf-8')).hexdigest()
-
 
 
 class BookLibraryAvailabilityModel(Model):

@@ -12,7 +12,8 @@ from lib.db import BookShelfInfoModel, Handler
 from lib.utils import bs4_scope, ProgressBar
 from lib.config import Config
 from lib.utils import get_file_path
-from lib.exceptions import ProfileNotFoundError, ShelvesScrapeError, BooksCollectError
+from lib.exceptions import ProfileNotFoundError, ShelvesScrapeError, BooksCollectError,\
+    DatabaseError
 
 
 class ShelfScraper:
@@ -55,7 +56,7 @@ class ShelfScraper:
             # Fetch books from given shelves.
             try:
                 self.get_books()
-            except BooksCollectError as e:
+            except (BooksCollectError, DatabaseError) as e:
                 self.logger.error(e)
                 return
 
@@ -174,16 +175,17 @@ class ShelfScraper:
         return book_shelves
 
     def get_books(self):
-        with Pool(processes=(cpu_count() * 2)) as self.pool:
-            for shelf in self.shelves:
+        for shelf in self.shelves:
+            with Pool(processes=(cpu_count())) as self.pool:
                 self.logger.debug(f'Fetching "{shelf["name"]}" shelf books')
                 shelf_book_urls = self.get_shelf_book_urls(shelf)
 
-                if not shelf_book_urls:
-                    self.logger.warning(f'No books found on shelf {shelf["name"]}')
-                    continue
-                self.logger.debug(f'Shelf book urls: {shelf_book_urls}')
+            if not shelf_book_urls:
+                self.logger.warning(f'No books found on shelf {shelf["name"]}')
+                continue
+            self.logger.debug(f'Shelf book urls: {shelf_book_urls}')
 
+            with Pool(processes=(cpu_count() * 2)) as self.pool:
                 shelf_books = self.get_books_from_urls(shelf_book_urls)
                 self.logger.debug(f'Shelf books: {shelf_books}')
 

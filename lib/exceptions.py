@@ -28,3 +28,7 @@ class ShelvesScrapeError(Exception):
 
 class BooksCollectError(Exception):
     pass
+
+
+class DatabaseError(Exception):
+    pass
