@@ -46,10 +46,10 @@ class LibraryBase:  # {{{
 
     def run(self):
         with FirefoxBrowser() as self.browser, requests.Session() as self.session:
-            # Open requested library page.
-            self.open_library_page()
-            # Fetch all books info.
             try:
+                # Open requested library page.
+                self.open_library_page()
+                # Fetch all books info.
                 books_availability = self.get_books_availability()
             except (NoSuchWindowException, TimeoutException) as e:
                 raise BrowserUnavailable(str(e))
