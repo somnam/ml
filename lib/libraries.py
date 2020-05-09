@@ -375,6 +375,16 @@ class Library5004(LibraryBase):  # {{{
             books=books,
         )
 
+    def open_library_page(self):
+        super().open_library_page()
+        # Confirm modal dialog.
+        try:
+            modal_confirm_class = '.modal-dialog #yt4'
+            if self.browser.wait_is_visible_by_css_selector(modal_confirm_class):
+                self.browser.find_element_by_css_selector(modal_confirm_class).click()
+        except (NoSuchElementException, WebDriverException):
+            pass
+
     def get_book_availability(self, book):
         # Wait for submit button to be visible.
         try:
