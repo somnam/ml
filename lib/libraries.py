@@ -51,7 +51,7 @@ class LibraryBase:  # {{{
                 self.open_library_page()
                 # Fetch all books info.
                 books_availability = self.get_books_availability()
-            except (NoSuchWindowException, TimeoutException) as e:
+            except (NoSuchWindowException, TimeoutException, WebDriverException) as e:
                 raise BrowserUnavailable(str(e))
 
         return books_availability
@@ -113,11 +113,7 @@ class LibraryBase:  # {{{
             search_field = search_fields.pop(0)
 
             # Fetch book info.
-            try:
-                search_results = self.search_for_book_by_field(book, search_field)
-            except WebDriverException as e:
-                self.logger.error(f'Web Driver error: {e!s}')
-                continue
+            search_results = self.search_for_book_by_field(book, search_field)
 
             # Book was found as available or unavailable.
             if search_results is not None:
@@ -308,7 +304,7 @@ class Library4949(LibraryBase):  # {{{
                 link.get_attribute('href') for link in
                 self.browser.find_elements_by_css_selector('div.zawartosc ul a')
             ]
-        except (NoSuchElementException, WebDriverException):
+        except NoSuchElementException:
             return []
 
     def find_matching_search_form_results_by_title(self, book, results):
@@ -382,7 +378,7 @@ class Library5004(LibraryBase):  # {{{
             modal_confirm_class = '.modal-dialog #yt4'
             if self.browser.wait_is_visible_by_css_selector(modal_confirm_class):
                 self.browser.find_element_by_css_selector(modal_confirm_class).click()
-        except (NoSuchElementException, WebDriverException):
+        except NoSuchElementException:
             pass
 
     def get_book_availability(self, book):
@@ -390,7 +386,7 @@ class Library5004(LibraryBase):  # {{{
         try:
             search_button = '.btn.search-main-btn'
             self.browser.wait_is_visible_by_css_selector(search_button)
-        except (NoSuchElementException, WebDriverException):
+        except NoSuchElementException:
             pass
 
         book_availability = super().get_book_availability(book)
@@ -399,7 +395,7 @@ class Library5004(LibraryBase):  # {{{
         try:
             main_page_selector = 'h1.library_title-pages > a'
             self.browser.find_element_by_css_selector(main_page_selector).click()
-        except (NoSuchElementException, WebDriverException):
+        except NoSuchElementException:
             pass
 
         return book_availability
