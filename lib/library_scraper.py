@@ -33,10 +33,8 @@ class LibraryScraper:
             self.google_client = None
 
         # How many selenium workers will be used.
-        self.nodes = (self.config['selenium'].getint('nodes')
-                      if ('selenium' in self.config
-                          and 'nodes' in self.config['selenium'])
-                      else 5)
+        self.nodes = self.config['selenium'].getint('nodes', fallback=5)
+        self.retry_run = self.config['selenium'].getint('retry_run', fallback=25)
 
     @property
     def shelf_name(self):
@@ -91,7 +89,7 @@ class LibraryScraper:
         try:
             books_info = self.fetch_books_info()
         except (BrowserUnavailable, BooksListUnavailable) as e:
-            self.logger.error(f'Feching books info failed: {e}')
+            self.logger.error(f'Fetching books info failed: {e}')
             return
 
         if not books_info:
@@ -104,7 +102,7 @@ class LibraryScraper:
     def fetch_books_info(self):
         shelf_books = self.shelf_books
         self.logger.info(f'Fetching {len(shelf_books)} books library info')
-
+        
         # Split shelf books into batches for worker nodes.
         step_size = math.ceil(len(shelf_books) / self.nodes)
         shelf_books_per_node = [shelf_books[i:i + step_size]
@@ -133,12 +131,22 @@ class LibraryScraper:
             return
 
         # Get library instance.
-        self.logger.debug(f'Creating library instance')
+        self.logger.debug('Creating library instance')
         library = self.library_factory(books=shelf_books_for_node)
 
         # Fetch books info
-        self.logger.debug(f'Running library search')
-        return library.run()
+        self.logger.debug('Running library search')
+        retry_run = self.retry_run
+        while retry_run:
+            try:
+                return library.run()
+            except BrowserUnavailable as e:
+                self.logger.error(f'Restarting browser due to: {e}.')
+            finally:
+                # Re-raise error after all retries fail.
+                retry_run -= 1
+                if not retry_run:
+                    raise
 
     def write_books_info(self, books_info):
         if self.google_client:

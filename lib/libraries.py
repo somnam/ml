@@ -52,7 +52,7 @@ class LibraryBase:  # {{{
                 # Fetch all books info.
                 books_availability = self.get_books_availability()
             except (NoSuchWindowException, TimeoutException, WebDriverException) as e:
-                raise BrowserUnavailable(str(e))
+                raise BrowserUnavailable(e)
 
         return books_availability
 
