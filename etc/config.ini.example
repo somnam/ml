@@ -26,6 +26,7 @@ invalidate_days = 30
 workbook_title = workbook title
 libraries = ["4949", "5004"]
 worksheet_headers = ["author", "title", "department", "section", "pages", "link"]
+invalidate_days = 1
 
 [libraries:4949]
 id = 4949
@@ -34,7 +35,6 @@ book_url = http://185.43.138.133:8080/Opac5/faces/Opis.jsp?ido=
 title = Opac
 shelf_name = shelf name
 accepted_locations = []
-invalidate_days = 1
 
 [libraries:5004]
 id = 5004
@@ -45,7 +45,6 @@ shelf_name = shelf name
 department = department name
 accepted_locations = []
 accepted_status = accepted status
-invalidate_days = 1
 
 
 [loggers]

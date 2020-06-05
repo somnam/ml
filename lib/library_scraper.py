@@ -22,8 +22,13 @@ class LibraryScraper:
         self.library_id = library_id
         self.profile_name = profile_name
         self.refresh = refresh
-        self.library_factory = library_factory(library_id, self.logger.name)
         self.config = Config()
+
+        invalidate_days = self.config['library_scraper'].getint('invalidate_days',
+                                                                fallback=1)
+        self.library_factory = library_factory(library_id=library_id,
+                                               logger=self.logger.name,
+                                               invalidate_days=invalidate_days)
 
         # Authenticate to Google if auth data is available.
         if auth_data:
@@ -93,7 +98,7 @@ class LibraryScraper:
             return
 
         if not books_info:
-            self.logger.info(f'No books from list available.')
+            self.logger.info('No books from list available.')
             return
 
         # Write books info locally or in Google drive.
@@ -102,7 +107,7 @@ class LibraryScraper:
     def fetch_books_info(self):
         shelf_books = self.shelf_books
         self.logger.info(f'Fetching {len(shelf_books)} books library info')
-        
+
         # Split shelf books into batches for worker nodes.
         step_size = math.ceil(len(shelf_books) / self.nodes)
         shelf_books_per_node = [shelf_books[i:i + step_size]

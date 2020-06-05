@@ -16,11 +16,13 @@ from selenium.webdriver.common.keys import Keys
 # }}}
 
 
-def library_factory(library_id, logger=None):
+def library_factory(library_id, logger=None, invalidate_days=None):
     try:
         library = getattr(sys.modules.get(__name__), f'Library{library_id}')
         if logger:
             setattr(library, 'logger', logging.getLogger(logger))
+        if invalidate_days:
+            setattr(library, 'invalidate_days', invalidate_days)
     except AttributeError:
         raise LibraryNotSupported(f'Library with id {library_id} not supported')
     return library
@@ -28,6 +30,7 @@ def library_factory(library_id, logger=None):
 
 class LibraryBase:  # {{{
     logger = logging.getLogger(__name__)
+    invalidate_days = 1
 
     def __init__(self, library_id, search_fields, books):
         self.books = books
@@ -35,8 +38,7 @@ class LibraryBase:  # {{{
         self.search_fields = search_fields
         self.isbn_sub_re = re.compile(r'\D+')
 
-        invalidate_days = self.config.getint('invalidate_days', fallback=1)
-        self.invalidate_date = datetime.utcnow() - timedelta(days=invalidate_days)
+        self.invalidate_date = datetime.utcnow() - timedelta(days=self.invalidate_days)
 
         self.handler = Handler()
         self.handler.create_all()
