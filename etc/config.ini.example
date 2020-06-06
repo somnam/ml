@@ -1,5 +1,5 @@
 [selenium]
-nodes = 4
+nodes = 5
 retry_run = 25
 headless = True
 hub_url = selenium hub url
