@@ -11,7 +11,7 @@ from multiprocessing.dummy import Pool, Lock
 from lib.db import BookShelfInfoModel, Handler
 from lib.utils import bs4_scope, ProgressBar
 from lib.config import Config
-from lib.utils import get_file_path
+from lib.utils import shelf_name_to_file_path
 from lib.exceptions import ProfileNotFoundError, ShelvesScrapeError, BooksCollectError,\
     DatabaseError
 
@@ -266,7 +266,7 @@ class ShelfScraper:
         with self.handler.session_scope() as session:
             session.query(BookShelfInfoModel).filter(
                 BookShelfInfoModel.url_md5 == BookShelfInfoModel.md5_from_url(book_url),
-            ).delete()
+            ).delete(synchronize_session=False)
             session.add(BookShelfInfoModel(
                 url_md5=BookShelfInfoModel.md5_from_url(book_url),
                 book_info=book_info,
@@ -435,7 +435,7 @@ class CLIShelfScraper(ShelfScraper):
         return book_urls
 
     def get_books_from_urls(self, shelf_book_urls):
-        bar_title = f'Collecting  books'
+        bar_title = 'Collecting books'
         with ProgressBar(bar_title, max=len(shelf_book_urls)) as self.bar:
             shelf_books = super().get_books_from_urls(shelf_book_urls)
         return shelf_books
@@ -447,7 +447,7 @@ class CLIShelfScraper(ShelfScraper):
         return book_info
 
     def set_book_prices(self, shelf_books):
-        bar_title = f'Collecting book prices'
+        bar_title = 'Collecting book prices'
         with ProgressBar(bar_title, max=len(shelf_books)) as self.bar:
             super().set_book_prices(shelf_books)
 
@@ -456,13 +456,8 @@ class CLIShelfScraper(ShelfScraper):
         with self.lock:
             self.bar.next()
 
-    def shelf_name_to_file_path(self, shelf_name):
-        shelf_filename = re.sub(r'\s+', '_', shelf_name.lower())
-        file_name = f'{self.profile_name}_{shelf_filename}.json'
-        return get_file_path('var', file_name)
-
     def save_books_list(self, shelf_name, shelf_books):
-        file_path = self.shelf_name_to_file_path(shelf_name)
+        file_path = shelf_name_to_file_path(shelf_name)
         self.logger.info('Writing books to file')
         with open(file_path, 'w', encoding='utf-8') as file_handle:
             json.dump(shelf_books, file_handle, ensure_ascii=False, indent=2)

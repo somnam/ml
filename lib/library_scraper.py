@@ -24,8 +24,8 @@ class LibraryScraper:
         self.refresh = refresh
         self.config = Config()
 
-        invalidate_days = self.config['library_scraper'].getint('invalidate_days',
-                                                                fallback=1)
+        invalidate_days = self.config.getint('library_scraper', 'invalidate_days',
+                                             fallback=1)
         self.library_factory = library_factory(library_id=library_id,
                                                logger=self.logger.name,
                                                invalidate_days=invalidate_days)
@@ -38,8 +38,10 @@ class LibraryScraper:
             self.google_client = None
 
         # How many selenium workers will be used.
-        self.nodes = self.config['selenium'].getint('nodes', fallback=5)
-        self.retry_run = self.config['selenium'].getint('retry_run', fallback=25)
+        self.nodes = self.config.getint('library_scraper', 'selenium_nodes',
+                                        fallback=5)
+        self.retry_run = self.config.getint('library_scraper', 'selenium_retry_run',
+                                            fallback=25)
 
     @property
     def shelf_name(self):

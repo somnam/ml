@@ -137,10 +137,8 @@ class FirefoxBrowser(Browser):
         # Customize Firefox instance.
         options = webdriver.FirefoxOptions()
         # Run in headless mode.
-        options.headless = (self.config['selenium'].getboolean('headless')
-                            if ('selenium' in self.config
-                                and 'headless' in self.config['selenium'])
-                            else True)
+        options.headless = self.config.getboolean('selenium', 'headless',
+                                                  fallback=True)
         # Create custom profile.
         options.profile = webdriver.FirefoxProfile()
         # Disable browser auto-updates.

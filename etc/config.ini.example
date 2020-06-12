@@ -1,6 +1,4 @@
 [selenium]
-nodes = 5
-retry_run = 25
 headless = True
 hub_url = selenium hub url
 
@@ -26,7 +24,20 @@ invalidate_days = 30
 workbook_title = workbook title
 libraries = ["4949", "5004"]
 worksheet_headers = ["author", "title", "department", "section", "pages", "link"]
+selenium_nodes = 5
+selenium_retry_run = 25
 invalidate_days = 1
+
+
+[latest_books_scraper]
+workbook_title = workbook title
+worksheet_title = Nowości {0}
+worksheet_headers = ["author", "title", "url"]
+xls_file_name = nowosci
+libraries = ["5004"]
+search_shelf_name = search shelf name
+invalidate_days = 30
+
 
 [libraries:4949]
 id = 4949
@@ -40,11 +51,17 @@ accepted_locations = []
 id = 5004
 url = https://katalog.rajska.info/catalog
 base_url = https://katalog.rajska.info
+news_url_template = https://katalog.rajska.info/news?{0}&{1}&{2}&{3}{4}
 title = Prolib Integro
 shelf_name = shelf name
 department = department name
-accepted_locations = []
-accepted_status = accepted status
+accepted_locations = ["WG"]
+accepted_status = dostępny
+agenda_title = Zaznacz: Wypożyczalnia Główna / Main Lending Library
+document_type_title = Wybierz: Książka
+language_title = Wybierz: polski
+pagination_value = 100
+last_page_title = Ostatnia
 
 
 [loggers]

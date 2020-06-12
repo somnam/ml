@@ -97,7 +97,7 @@ class LibraryBase:  # {{{
             session.query(BookLibraryAvailabilityModel).filter(
                 BookLibraryAvailabilityModel.library_id == self.config["id"],
                 BookLibraryAvailabilityModel.book_md5 == book_md5,
-            ).delete()
+            ).delete(synchronize_session=False)
             session.add(BookLibraryAvailabilityModel(
                 library_id=self.config['id'],
                 book_md5=BookLibraryAvailabilityModel.md5_from_book(book),

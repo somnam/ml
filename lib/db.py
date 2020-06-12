@@ -1,14 +1,13 @@
 import json
 from datetime import datetime
 from sqlite3 import Connection as SQLite3Connection
-from sqlalchemy import engine_from_config, MetaData, Column, TypeDecorator
-from sqlalchemy.types import CHAR, DateTime, Integer, Text
+from sqlalchemy import engine_from_config, MetaData, Column, TypeDecorator, Index
+from sqlalchemy.types import CHAR, DateTime, Text, Integer
 from sqlalchemy.event import listens_for
 from sqlalchemy.engine import Engine
 from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy.orm import sessionmaker, scoped_session
 from sqlalchemy.exc import DBAPIError, SQLAlchemyError, InterfaceError, OperationalError
-from sqlalchemy.pool import StaticPool
 from contextlib import contextmanager
 from hashlib import md5
 from lib.config import Config
@@ -41,9 +40,7 @@ class Handler:
                 cursor.close()
 
         # Connector pool class must be changed for multithreaded connections.
-        self.engine = engine_from_config(configuration=Config()['db'],
-                                         connect_args={'check_same_thread': False},
-                                         poolclass=StaticPool)
+        self.engine = engine_from_config(configuration=Config()['db'])
         self.session_factory = sessionmaker(bind=self.engine)
         self.scoped_session = scoped_session(self.session_factory)
 
@@ -93,8 +90,8 @@ class BookShelfInfoModel(Model):
 class BookLibraryAvailabilityModel(Model):
     __tablename__ = 'book_library_availability'
 
-    library_id = Column(Integer, primary_key=True)
     book_md5 = Column(CHAR(32), primary_key=True)
+    library_id = Column(CHAR(4), primary_key=True)
     search_results = Column(JsonType)
     created = Column(DateTime, nullable=False, default=datetime.utcnow)
 
@@ -104,3 +101,21 @@ class BookLibraryAvailabilityModel(Model):
         for field in ('title', 'author', 'isbn'):
             book_md5.update((book.get(field) or '').encode('utf-8'))
         return book_md5.hexdigest()
+
+
+class NewBooksInfoModel(Model):
+    __tablename__ = 'new_books_info'
+
+    _pk = Column(Integer(), primary_key=True)
+    url_md5 = Column(CHAR(32), nullable=False)
+    library_id = Column(CHAR(4), nullable=False)
+    isbn = Column(CHAR(13), nullable=False)
+    created = Column(DateTime, nullable=False, default=datetime.utcnow)
+
+    __table_args__ = (
+        Index('ix_new_books_info_url_md5', 'url_md5', 'created'),
+    )
+
+    @staticmethod
+    def md5_from_url(url):
+        return md5(url.encode('utf-8')).hexdigest()

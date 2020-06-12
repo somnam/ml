@@ -12,6 +12,7 @@ setup(
         'console_scripts': [
             'shelf_scraper=libexec.shelf_scraper:run',
             'library_scraper=libexec.library_scraper:run',
+            'latest_books_scraper=libexec.latest_books_scraper:run',
         ],
     },
 )
