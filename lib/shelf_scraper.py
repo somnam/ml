@@ -192,8 +192,8 @@ class ShelfScraper:
                 if self.include_price:
                     self.set_book_prices(shelf_books)
 
-                self.sort_books_list(shelf_books)
-                self.save_books_list(shelf['name'], shelf_books)
+            self.sort_books_list(shelf_books)
+            self.save_books_list(shelf['name'], shelf_books)
 
     def get_shelf_book_urls(self, shelf):
         pages_info = [json.dumps({'page': page, 'shelf_id': shelf['id']})
@@ -457,7 +457,7 @@ class CLIShelfScraper(ShelfScraper):
             self.bar.next()
 
     def save_books_list(self, shelf_name, shelf_books):
-        file_path = shelf_name_to_file_path(shelf_name)
-        self.logger.info('Writing books to file')
+        self.logger.info(f'Writing books on shelf {shelf_name} to file')
+        file_path = shelf_name_to_file_path(self.profile_name, shelf_name)
         with open(file_path, 'w', encoding='utf-8') as file_handle:
             json.dump(shelf_books, file_handle, ensure_ascii=False, indent=2)
