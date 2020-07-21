@@ -388,7 +388,7 @@ class ShelfScraper:
         return book_price
 
     def sort_books_list(self, shelf_books):
-        self.logger.info(f'Sorting books')
+        self.logger.debug('Sorting books')
 
         sort_key = 'price' if self.include_price else 'release'
         reverse_sort = sort_key != 'price'

@@ -27,10 +27,13 @@ def run(context, library_id, profile_name, auth_data, refresh):
         return
 
     try:
-        CLILatestBooksScraper(library_id=library_id,
-                              profile_name=profile_name,
-                              auth_data=auth_data,
-                              refresh=refresh).run()
+        latest_books_scraper = CLILatestBooksScraper(
+            library_id=library_id,
+            profile_name=profile_name,
+            auth_data=auth_data,
+            refresh=refresh
+        )
+        latest_books_scraper.run()
     except (LibraryNotSupported, LibraryPageNotValid,
             LibraryNotConfigured, BooksListUnavailable) as e:
         click.echo(e, color=context.color)
