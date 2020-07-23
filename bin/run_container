@@ -1,0 +1,54 @@
+#!/bin/bash
+
+
+check_dependencies ()
+{
+    set -e
+    [[ -x "$(which docker)" ]] || (echo -e "\e[33mDocker isn't installed\e[0m" && exit 1)
+    set +e
+}
+
+build_docker_image ()
+{
+    echo -e "\e[36mBuilding docker image (this may take some time).\e[0m"
+
+    local self_path=$(dirname "$0")
+    local root_path=$(dirname "$self_path")
+    local dockerfile_path=$(realpath "$root_path/etc/Dockerfile")
+    set -e
+    [[ -f "$dockerfile_path" ]] || (echo -e "\e[33mDockerfile doesn't exist\e[0m" && exit 1)
+    set +e
+
+    docker stop -t0 ml 1>/dev/null
+    docker system prune -f 1>/dev/null
+    docker build --quiet --tag ml --file $dockerfile_path . 1>/dev/null
+}
+
+run_container ()
+{
+    echo -e "\e[36mRunning container\e[0m"
+    local self_name=$(basename "$0")
+    local self_path=$(dirname "$0")
+    local root_path=$(dirname "$self_path")
+    local bind_path=$(realpath "$root_path/var/")
+    docker run \
+        --detach \
+        --interactive \
+        --shm-size=256mb\
+        --mount type=bind,src="$bind_path",target=/home/sandbox/ml/var \
+        --env PATH="/home/sandbox/.local/bin:$PATH" \
+        --name ml \
+        ml:latest
+}
+
+run_container_shell ()
+{
+    echo -e "\e[36mRunning container shell\e[0m"
+    docker exec -it ml bash -l
+}
+
+
+check_dependencies
+build_docker_image
+run_container
+run_container_shell

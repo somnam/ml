@@ -11,14 +11,14 @@ RUN apt-get update \
     && apt-get upgrade -y \
     && mkdir -p /usr/share/man/man1 \
     && apt-get install -y --no-install-recommends \
-        wget \
+        wget less vim \
         build-essential \
         firefox-esr \
         default-jre-headless \
     && apt-get clean && rm -rf /var/lib/apt/lists
 
 # Create sandbox user
-RUN useradd sandbox --create-home --shell /bin/bash\
+RUN useradd sandbox --create-home --shell /bin/bash -G users\
     && su -c "mkdir -p /home/sandbox/.local/bin" sandbox
 
 # Download geckodriver
@@ -33,6 +33,9 @@ RUN runuser -l sandbox -c '\
 RUN runuser -l sandbox -c '\
     wget -q -nv -O /home/sandbox/.local/bin/selenium-server-standalone.jar \
          https://selenium-release.storage.googleapis.com/3.141/selenium-server-standalone-3.141.59.jar'
+
+# Copy rc files
+COPY --chown=sandbox:sandbox ./etc/.bash_aliases ./etc/.vimrc /home/sandbox/
 
 # Copy requirements file
 COPY --chown=sandbox:sandbox requirements.in setup.py /home/sandbox/ml/
