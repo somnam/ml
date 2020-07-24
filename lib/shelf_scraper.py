@@ -84,26 +84,31 @@ class ShelfScraper:
         return search_results
 
     def match_profile_by_name(self, search_results):
-        self.logger.debug(f'Matching profile in search results')
+        self.logger.debug('Matching profile in search results')
 
-        profile_url_re = re.compile(r'/profil/\d+/'.format({self.profile_name}),
+        profile_url_re = re.compile(r'/profil/\d+/{0}'.format(self.profile_name),
                                     re.IGNORECASE)
         with bs4_scope(search_results) as parsed_results:
             # Search for profile link in results.
             profile_link = parsed_results.find('a', {'href': profile_url_re})
 
         if not profile_link:
-            raise ProfileNotFoundError(f'Empty search result')
+            raise ProfileNotFoundError('Empty search result')
 
         parsed_url = urlparse(profile_link.get('href'))
-        if parsed_url and parsed_url.path:
-            *_, profile_id, profile_name = parsed_url.path.split('/')
-            self.logger.info(f'Found profile matching "{self.profile_name}"'
-                             f' with id: {profile_id}')
-        else:
+        if not parsed_url.path:
             raise ProfileNotFoundError(f'Profile matching {self.profile_name}'
                                        ' not found')
 
+        profile_id_result = re.search(r'\d+', parsed_url.path)
+
+        if not(profile_id_result and profile_id_result.group()):
+            raise ProfileNotFoundError(f'Profile id matching {self.profile_name}'
+                                       ' not found')
+
+        profile_id = profile_id_result.group()
+        self.logger.info(f'Found profile matching "{self.profile_name}"'
+                         f' with id: {profile_id}')
         return profile_id
 
     def get_book_shelves(self):
