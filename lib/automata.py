@@ -139,6 +139,12 @@ class FirefoxBrowser(Browser):
         # Run in headless mode.
         options.headless = self.config.getboolean('selenium', 'headless',
                                                   fallback=True)
+        # Set Firefox binary location
+        binary_location = path.join(path.expanduser('~'),
+                                    '.local', 'firefox', 'firefox')
+        if path.exists(binary_location):
+            options.binary_location = binary_location
+
         # Create custom profile.
         options.profile = webdriver.FirefoxProfile()
         # Disable browser auto-updates.

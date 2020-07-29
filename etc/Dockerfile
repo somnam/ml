@@ -23,8 +23,9 @@ RUN useradd sandbox --create-home --shell /bin/bash -G users\
 
 # Download geckodriver
 RUN runuser -l sandbox -c '\
-    wget -q -nv -O- https://api.github.com/repos/mozilla/geckodriver/releases/latest \
-        | grep "browser_download_url.*linux64" \
+    wget -qO- https://api.github.com/repos/mozilla/geckodriver/releases/latest \
+        | python -mjson.tool \
+        | grep "browser_download_url.*linux64.tar.gz[^.]" \
         | sed "s/^.*\(http.*tar.gz\).*$/\1/" \
         | xargs wget -qO-\
         | tar -xz -C /home/sandbox/.local/bin/'
@@ -33,6 +34,11 @@ RUN runuser -l sandbox -c '\
 RUN runuser -l sandbox -c '\
     wget -q -nv -O /home/sandbox/.local/bin/selenium-server-standalone.jar \
          https://selenium-release.storage.googleapis.com/3.141/selenium-server-standalone-3.141.59.jar'
+
+# Download latest firefox
+RUN runuser -l sandbox -c '\
+    wget -qO- "https://download.mozilla.org/?product=firefox-latest&os=Linux64&lang=en-US" \
+        | tar -xj -C /home/sandbox/.local/'
 
 # Copy rc files
 COPY --chown=sandbox:sandbox ./etc/.bash_aliases ./etc/.vimrc /home/sandbox/
