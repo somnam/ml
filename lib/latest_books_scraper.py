@@ -97,7 +97,9 @@ class Library5004(LibraryBase):
                                                  'news_url_template')
 
     async def get_books_isbn(self):
-        async with aiohttp.ClientSession() as self.session:
+        # Limit number of open connections.
+        connector = aiohttp.TCPConnector(limit=30)
+        async with aiohttp.ClientSession(connector=connector) as self.session:
             book_urls = await self.get_book_urls()
 
             book_isbn_tasks = [self.get_book_isbn(book_url)
