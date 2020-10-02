@@ -1,15 +1,8 @@
-# Python
-*.pyc
-*.pyo
-
 # Project
 *.json
-*.xls
 *.xlsx
-*.cache
 *.log
 *.db
-*.db-*
 *.ini
 *.pid
 

@@ -17,7 +17,7 @@ lc_profile_url = https://lubimyczytac.pl/profil
 lc_shelf_page_url = https://lubimyczytac.pl/profile/getLibraryBooksList
 bb_url = https://widget.getbuybox.com/v3/1/buybox.json
 retailers = []
-invalidate_days = 30
+invalidate_days = 365
 
 
 [library_scraper]
