@@ -377,7 +377,7 @@ class Library5004(LibraryBase):  # {{{
         super().open_library_page()
         # Confirm modal dialog.
         try:
-            modal_confirm_class = '.modal-dialog #yt4'
+            modal_confirm_class = '.modal-dialog input.btn-primary'
             if self.browser.wait_is_visible_by_css_selector(modal_confirm_class):
                 self.browser.find_element_by_css_selector(modal_confirm_class).click()
         except NoSuchElementException:
