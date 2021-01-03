@@ -1,18 +1,19 @@
-import re
-import json
-import math
-import logging
-import datetime
 import concurrent.futures
+import datetime
+import json
+import logging
+import math
+import re
 from operator import itemgetter
-from lib.shelf_scraper import CLIShelfScraper
-from lib.libraries import library_factory
-from lib.automata import BrowserUnavailable
-from lib.gdocs import get_service_client, write_rows_to_worksheet
-from lib.xls import make_xls
-from lib.utils import get_file_path
+
 from lib.config import Config
-from lib.exceptions import LibraryNotConfigured, BooksListUnavailable
+from lib.exceptions import (BooksListUnavailable, BrowserUnavailable,
+                            LibraryNotConfigured)
+from lib.gdocs import get_service_client, write_rows_to_worksheet
+from lib.libraries import library_factory
+from lib.shelf_scraper import CLIShelfScraper
+from lib.utils import get_file_path
+from lib.xls import make_xls
 
 
 class LibraryScraper:
@@ -57,23 +58,22 @@ class LibraryScraper:
         return self._shelf_name
 
     @property
-    def shelf_contents_file_name(self):
-        if not hasattr(self, '_shelf_contents_file_name'):
+    def shelf_file_name(self):
+        if not hasattr(self, '_shelf_file_name'):
             file_name = re.sub(r'\s+', '_', self.shelf_name.lower())
             file_name = f'{self.profile_name}_{file_name}.json'
 
-            setattr(self, '_shelf_contents_file_name', file_name)
-        return self._shelf_contents_file_name
+            setattr(self, '_shelf_file_name', file_name)
+        return self._shelf_file_name
 
     @property
     def shelf_books(self):
         if not hasattr(self, '_shelf_books'):
-            shelf_contents_file_path = get_file_path('var',
-                                                     self.shelf_contents_file_name)
+            shelf_file_path = get_file_path('var', self.shelf_file_name)
             # Read file contents.
             self.logger.info(f'Reading in books list from shelf "{self.shelf_name}"')
             try:
-                with open(shelf_contents_file_path, 'r', encoding='utf-8') as file_handle:
+                with open(shelf_file_path, 'r', encoding='utf-8') as file_handle:
                     file_data = json.load(file_handle)
             except (FileNotFoundError, json.JSONDecodeError) as e:
                 raise BooksListUnavailable(e)
@@ -150,10 +150,11 @@ class LibraryScraper:
             except BrowserUnavailable as e:
                 self.logger.error(f'Restarting browser due to: {e}.')
             finally:
-                # Re-raise error after all retries fail.
                 retry_run -= 1
-                if not retry_run:
-                    raise
+
+        # All retries have failed.
+        self.logger.critical(f"Unable to search library {self.library_id}")
+        return []
 
     def write_books_info(self, books_info):
         if self.google_client:
@@ -191,7 +192,7 @@ class LibraryScraper:
             worksheet_headers=worksheet_headers,
             rows=books_info,
         )
-        self.logger.info(f'Books info written to XLS file')
+        self.logger.info('Books info written to XLS file')
 
 
 class CLILibraryScraper(LibraryScraper):

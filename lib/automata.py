@@ -1,16 +1,20 @@
 # Import {{{
 import logging
-import urllib3
-from urllib3.exceptions import MaxRetryError
+import os
 from os import path
-from lib.config import Config
-from lib.utils import get_file_path
-from lib.exceptions import BrowserUnavailable
+
+import urllib3
 from selenium import webdriver
-from selenium.common.exceptions import TimeoutException, NoSuchElementException
+from selenium.common.exceptions import NoSuchElementException, TimeoutException
 from selenium.webdriver.common.by import By
 from selenium.webdriver.support import expected_conditions
-from selenium.webdriver.support.ui import Select, WebDriverWait
+from selenium.webdriver.support.ui import WebDriverWait
+from urllib3.exceptions import MaxRetryError
+
+from lib.config import Config
+from lib.exceptions import BrowserUnavailable
+from lib.utils import get_file_path
+
 # }}}
 
 
@@ -74,11 +78,14 @@ class Browser:
     def __exit__(self, exception_type, exception_value, traceback):
         self._browser.quit()
 
-    def wait_is_visible_by_id(self, locator):
-        return self.wait_is_visible(locator, using=By.ID)
+    def wait_is_visible_by_id(self, locator, **kwargs):
+        return self.wait_is_visible(locator, using=By.ID, **kwargs)
 
-    def wait_is_visible_by_css_selector(self, locator):
-        return self.wait_is_visible(locator, using=By.CSS_SELECTOR)
+    def wait_is_visible_by_css(self, locator, **kwargs):
+        return self.wait_is_visible(locator, using=By.CSS_SELECTOR, **kwargs)
+
+    def wait_is_visible_by_xpath(self, locator, **kwargs):
+        return self.wait_is_visible(locator, using=By.XPATH, **kwargs)
 
     def wait_is_visible(self, locator, using, timeout=5):
         try:
@@ -91,10 +98,31 @@ class Browser:
         except (TimeoutException, NoSuchElementException):
             return False
 
-    def wait_is_not_visible_by_id(self, locator):
+    def wait_is_clickable_by_css(self, locator, **kwargs):
+        return self.wait_is_clickable(locator, using=By.CSS_SELECTOR, **kwargs)
+
+    def wait_is_clickable_by_xpath(self, locator, **kwargs):
+        return self.wait_is_clickable(locator, using=By.XPATH, **kwargs)
+
+    def wait_is_clickable(self, locator, using, timeout=3):
+        try:
+            element = self._browser.find_element(by=using, value=locator)
+
+            self.wait_for_stillness_of(element, timeout)
+
+            WebDriverWait(self._browser, timeout).until(
+                expected_conditions.element_to_be_clickable(
+                    (using, locator)
+                )
+            )
+            return True
+        except (TimeoutException, NoSuchElementException):
+            return False
+
+    def wait_is_not_visible_by_id(self, locator, **kwargs):
         return self.wait_is_not_visible(locator, using=By.ID)
 
-    def wait_is_not_visible_by_css_selector(self, locator):
+    def wait_is_not_visible_by_css(self, locator, **kwargs):
         return self.wait_is_not_visible(locator, using=By.CSS_SELECTOR)
 
     def wait_is_not_visible(self, locator, using, timeout=5):
@@ -108,25 +136,24 @@ class Browser:
         except TimeoutException:
             return False
 
+    def wait_for_stillness_of(self, element, timeout=5):
+        try:
+            WebDriverWait(self._browser, timeout).until(
+                expected_conditions.staleness_of(element)
+            )
+        except TimeoutException:
+            pass
+
     def set_input_value_by_id(self, locator, value):
         return self.set_input_value(locator, value, using=By.ID)
 
-    def set_input_value_by_css_selector(self, locator, value):
+    def set_input_value_by_css(self, locator, value):
         return self.set_input_value(locator, value, using=By.CSS_SELECTOR)
 
     def set_input_value(self, locator, value, using):
         if self.wait_is_visible(locator, using):
             field = self._browser.find_element(by=using, value=locator)
             field.send_keys(value)
-
-    def set_select_option_by_id(self, select_id, option):
-        select = None
-        if self.wait_is_visible_by_id(select_id):
-            option_css_selector = f'select[id="{select_id}"] > option[value="{option}"]'
-            if self.wait_is_visible_by_css_selector(option_css_selector):
-                select = Select(self._browser.find_element_by_id(select_id))
-                select.select_by_value(option)
-        return select
 
 
 class FirefoxBrowser(Browser):
@@ -139,6 +166,12 @@ class FirefoxBrowser(Browser):
         # Run in headless mode.
         options.headless = self.config.getboolean('selenium', 'headless',
                                                   fallback=True)
+
+        # Set headless mode width / height.
+        if options.headless:
+            os.environ['MOZ_HEADLESS_WIDTH'] = '1920'
+            os.environ['MOZ_HEADLESS_HEIGHT'] = '1080'
+
         # Set Firefox binary location
         binary_location = path.join(path.expanduser('~'),
                                     '.local', 'firefox', 'firefox')

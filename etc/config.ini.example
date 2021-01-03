@@ -25,7 +25,7 @@ workbook_title = workbook title
 libraries = ["4949", "5004"]
 worksheet_headers = ["author", "title", "department", "section", "pages", "link"]
 selenium_nodes = 5
-selenium_retry_run = 25
+selenium_retry_run = 5
 invalidate_days = 1
 
 
@@ -41,20 +41,54 @@ invalidate_days = 30
 
 [libraries:4949]
 id = 4949
-url = http://185.43.138.133:8080/Opac5/
-book_url = http://185.43.138.133:8080/Opac5/faces/Opis.jsp?ido=
-title = Opac
+search_fields = ["title"]
+url = https://opac.ksiaznica.bielsko.pl/
+title = Katalog Biblioteki
 shelf_name = shelf name
-accepted_locations = []
+accepted_locations = ["Słowackiego 17a", "11 Listopada 40"]
+accepted_locations_query = ["//mat-panel-title[contains(., 'Zasoby dostępne')]/ancestor::mat-expansion-panel//span[contains(., 'Biblioteka Główna')]", "//mat-panel-title[contains(., 'Zasoby dostępne')]/ancestor::mat-expansion-panel//span[contains(., 'Dzielnicowa Biblioteka Publiczna')]"]
+main_page_query = //mat-toolbar//span[contains(., 'Strona główna')]
+search_form_query = mat-card#searchCard
+add_search_form_query = button.mat-icon-button[aria-label='Dodaj warunek']
+search_input_query = input#searchInput
+add_search_input_query = .condition-group-form input[placeholder='Wpisz szukaną frazę...']
+search_autocomplete_query = .mat-autocomplete-visible
+search_by_query = .mat-select[aria-label='Wybierz indeks w którym chcesz wyszukiwać']
+add_search_by_query = .condition-group-form .mat-select[aria-label='Wyszukaj po..']
+add_operator_query = .condition-group-form .mat-select[aria-label='Operator']
+search_by_isbn_query = //mat-option/span[normalize-space(text())='ISBN']
+search_by_title_query = //mat-option/span[normalize-space(text())='Tytuł']
+search_by_author_query = //mat-option/span[normalize-space(text())='Autor']
+book_document_query = //mat-checkbox/label/span[contains(., 'Książka')]
+search_and_query = //mat-option/span[normalize-space(text())='i']
+search_button_query = button.HomeSearchButton
+add_search_button_query = button.mat-icon-button[aria-label='Wyszukaj w katalogu wpisaną frazę']
+available_locations_query = //mat-panel-title[contains(., 'Zasoby dostępne')]
+more_locations_query = //mat-panel-title[contains(., 'Zasoby dostępne')]/ancestor::mat-expansion-panel//span[contains(., 'więcej')]
+button_availability_query = button[aria-label^="Dostępność"]
+button_available_query = //button[contains(., 'Dostępne')]
+result_row_query = div[aria-label^='Wyszukana pozycja']
+no_results_query = app-no-result
+action_button_query = button.main-action
+action_modal_query = .mat-dialog-container
+modal_loading_overlay = div.loading-bg
+modal_only_available_query = //span[contains(., 'Wyświetl tylko filie z dostępną pozycją')]
+modal_no_results_query = //div[@class='mat-dialog-content']//p[contains(., 'Brak wyników')]
+modal_result_row_query = div.mat-dialog-content > div.no-phone > div.row
+modal_row_address_query = span.adres
+modal_row_show_section_query = //span[contains(., 'pokaż zawartość')]
+modal_row_section_query = div.zasob div.item > span
+modal_close_button = //span[contains(., 'Zamknij')]
 
 [libraries:5004]
 id = 5004
+search_fields = ["title_and_author"]
 url = https://katalog.rajska.info/catalog
 base_url = https://katalog.rajska.info
 news_url_template = https://katalog.rajska.info/news?{0}&{1}&{2}&{3}{4}
 title = Prolib Integro
 shelf_name = shelf name
-department = department name
+department = Wypożyczalnia Główna
 accepted_locations = ["WG"]
 accepted_status = dostępny
 agenda_title = Zaznacz: Wypożyczalnia Główna / Main Lending Library
