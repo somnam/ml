@@ -200,12 +200,19 @@ class Library5004(LibraryBase):
                 config = self.config[f'libraries:{self.library_id}']
                 with bs4_scope(content) as news_page:
                     last_pager_re = re.compile(config['last_page_title'])
-                    last_pager = news_page.find('a', string=last_pager_re)\
-                        .get('href', '')\
-                        .replace(news_url.replace(config['base_url'], ''), '')
+                    last_pager_link = news_page.find('a', string=last_pager_re)
+                    if last_pager_link:
+                        last_pager = last_pager_link\
+                            .get('href', '')\
+                            .replace(news_url.replace(config['base_url'], ''), '')
+                    else:
+                        last_pager = None
         except (aiohttp.ClientError, asyncio.TimeoutError) as e:
             self.logger.error(f'Fetching news urls failed: {e}')
             return []
+
+        if last_pager is None:
+            return ['']
 
         # Get pager range from last pager.
         last_pager_items = int(re.sub(r'\D+', '', last_pager))
