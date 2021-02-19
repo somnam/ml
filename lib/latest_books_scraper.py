@@ -133,7 +133,7 @@ class Library5004(LibraryBase):
                             'div.description-list-section > dl > dd:nth-child(2) > a'
                         )
                     ]
-        except aiohttp.ClientError as e:
+        except (aiohttp.ClientError, asyncio.TimeoutError) as e:
             self.logger.error(f'Fetching book urls on page failed: {e}')
             return []
 
@@ -181,7 +181,7 @@ class Library5004(LibraryBase):
                     pagination = news_page.find('a', string=pagination_re)\
                         .get('href', f'/news?{defaults["pagination"]}')\
                         .replace('/news?', '')
-        except aiohttp.ClientError as e:
+        except (aiohttp.ClientError, asyncio.TimeoutError) as e:
             self.logger.error(f'Fetching news url params failed: {e}')
             agenda = defaults['agenda']
             document_type = defaults['document_type']
@@ -203,7 +203,7 @@ class Library5004(LibraryBase):
                     last_pager = news_page.find('a', string=last_pager_re)\
                         .get('href', '')\
                         .replace(news_url.replace(config['base_url'], ''), '')
-        except aiohttp.ClientError as e:
+        except (aiohttp.ClientError, asyncio.TimeoutError) as e:
             self.logger.error(f'Fetching news urls failed: {e}')
             return []
 
@@ -243,7 +243,7 @@ class Library5004(LibraryBase):
                     isbn_list = [re.sub(r'\D+', '', child.string)
                                  for child in isbn_list_tag.children
                                  if child.string]
-        except aiohttp.ClientError as e:
+        except (aiohttp.ClientError, asyncio.TimeoutError) as e:
             self.logger.error(f'Fetching book failed: {e}')
             return []
 
