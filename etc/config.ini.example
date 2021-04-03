@@ -91,7 +91,6 @@ shelf_name = shelf name
 department = Wypożyczalnia Główna
 accepted_locations = ["WG"]
 accepted_status = dostępny
-agenda_title = Zaznacz: Wypożyczalnia Główna / Main Lending Library
 document_type_title = Wybierz: Książka
 language_title = Wybierz: polski
 pagination_value = 100

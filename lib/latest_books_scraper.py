@@ -150,7 +150,6 @@ class Library5004(LibraryBase):
         news_url = re.sub(r'\?.*$', '', self.news_url_template)
 
         defaults = {
-            'agenda': '?f2[0]=7',
             'document_type': 'f4[0]=1',
             'language': 'f8[0]=pol',
             'pagination': 'rp=100',
@@ -162,10 +161,6 @@ class Library5004(LibraryBase):
                 content = await response.read()
                 config = self.config[f'libraries:{self.library_id}']
                 with bs4_scope(content) as news_page:
-                    agenda_title = config['agenda_title']
-                    agenda = news_page.select_one(f'a[title="{agenda_title}"]')\
-                        .get('href', f'/news?{defaults["agenda"]}')\
-                        .replace('/news?', '')
 
                     document_type_title = config['document_type_title']
                     document_type = news_page.select_one(f'a[title="{document_type_title}"]')\
@@ -183,12 +178,11 @@ class Library5004(LibraryBase):
                         .replace('/news?', '')
         except (aiohttp.ClientError, asyncio.TimeoutError) as e:
             self.logger.error(f'Fetching news url params failed: {e}')
-            agenda = defaults['agenda']
             document_type = defaults['document_type']
             language = defaults['language']
             pagination = defaults['pagination']
 
-        return agenda, document_type, language, pagination
+        return document_type, language, pagination
 
     async def prepare_news_url_pagers(self, params):
         # Open page with params to calculate pager.
