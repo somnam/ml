@@ -327,7 +327,7 @@ class LatestBooksScraper:
 
         self.logger.debug('Writing books info to XLS file')
         make_xls(
-            file_name=f"{xls_file_name}{self.library_id}",
+            file_name=f"{xls_file_name}{self.library.library_id}",
             worksheet_name=worksheet_name,
             worksheet_headers=worksheet_headers,
             rows=matching_books,
