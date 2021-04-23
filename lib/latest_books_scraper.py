@@ -123,19 +123,24 @@ class Library5004(LibraryBase):
     async def get_book_urls_on_page(self, news_url):
         base_url = self.config.get(f'libraries:{self.library_id}', 'base_url')
 
+        selectors = self.config.getstruct(f'latest_books:{self.library_id}',
+                                          'book_urls_query')
+
+        book_urls = []
+
         try:
             async with self.session.get(news_url, raise_for_status=True) as response:
                 content = await response.read()
+
                 with bs4_scope(content) as news_page:
-                    return [
-                        f'{base_url}{a["href"]}' for a in
-                        news_page.select(
-                            'div.description-list-section > dl > dd:nth-child(2) > a'
-                        )
-                    ]
+                    for selector in selectors:
+                        book_urls.extend([f'{base_url}{a["href"]}' for a in news_page.select(selector)])
+
         except (aiohttp.ClientError, asyncio.TimeoutError) as e:
             self.logger.error(f'Fetching book urls on page failed: {e}')
             return []
+
+        return book_urls
 
     async def prepare_news_urls(self):
         params = await self.prepare_news_url_params()
@@ -318,9 +323,11 @@ class LatestBooksScraper:
                                                   'worksheet_headers')
         worksheet_name = f'{date.today()}'
 
+        xls_file_name = self.config.get('latest_books_scraper', 'xls_file_name')
+
         self.logger.debug('Writing books info to XLS file')
         make_xls(
-            file_name=self.config.get('latest_books_scraper', 'xls_file_name'),
+            file_name=f"{xls_file_name}{self.library_id}",
             worksheet_name=worksheet_name,
             worksheet_headers=worksheet_headers,
             rows=matching_books,

@@ -24,7 +24,7 @@ invalidate_days = 365
 workbook_title = workbook title
 libraries = ["4949", "5004"]
 worksheet_headers = ["author", "title", "department", "section", "pages", "link"]
-selenium_nodes = 5
+selenium_nodes = 4
 selenium_retry_run = 5
 invalidate_days = 1
 
@@ -37,6 +37,10 @@ xls_file_name = nowosci
 libraries = ["5004"]
 search_shelf_name = search shelf name
 invalidate_days = 30
+
+
+[latest_books:5004]
+book_urls_query = ["div.description-list-section > dl > dd:nth-child(2) > a", "div.description-list-section > dl:nth-child(1) > dd:nth-child(4) > a"]
 
 
 [libraries:4949]
@@ -85,7 +89,7 @@ id = 5004
 search_fields = ["title_and_author"]
 url = https://katalog.rajska.info/catalog
 base_url = https://katalog.rajska.info
-news_url_template = https://katalog.rajska.info/news?{0}&{1}&{2}&{3}{4}
+news_url_template = https://katalog.rajska.info/news?{0}&{1}&{2}{3}
 title = Prolib Integro
 shelf_name = shelf name
 department = Wypożyczalnia Główna
