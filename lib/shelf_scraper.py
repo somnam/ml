@@ -302,14 +302,14 @@ class ShelfScraper:
 
                 # Get original title.
                 original_title_tag = book_details.select_one(
-                    'dt:contains("Tytuł oryginału") + dd'
+                    'dt:-soup-contains("Tytuł oryginału") + dd'
                 )
                 original_title = (original_title_tag.text.strip()
                                   if original_title_tag else None)
 
                 # Get pages count.
                 pages_count_tag = book_details.select_one(
-                    'dt:contains("Liczba stron") + dd'
+                    'dt:-soup-contains("Liczba stron") + dd'
                 )
                 pages_count = (pages_count_tag.text.strip()
                                if pages_count_tag else None)
@@ -319,13 +319,13 @@ class ShelfScraper:
 
                 # Get release date.
                 release_tag = book_details.select_one(
-                    'dt:contains("Data wydania") + dd'
+                    'dt:-soup-contains("Data wydania") + dd'
                 )
                 release = (release_tag.text.strip() if release_tag else None)
 
                 # Get book ISBN. ISBN is not always present.
                 isbn_tag = book_details.select_one(
-                    'dt:contains("ISBN") + dd'
+                    'dt:-soup-contains("ISBN") + dd'
                 )
                 isbn = (self.isbn_sub_re.sub('', isbn_tag.text) if isbn_tag else None)
 
