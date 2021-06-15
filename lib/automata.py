@@ -120,10 +120,10 @@ class Browser:
             return False
 
     def wait_is_not_visible_by_id(self, locator, **kwargs):
-        return self.wait_is_not_visible(locator, using=By.ID)
+        return self.wait_is_not_visible(locator, using=By.ID, **kwargs)
 
     def wait_is_not_visible_by_css(self, locator, **kwargs):
-        return self.wait_is_not_visible(locator, using=By.CSS_SELECTOR)
+        return self.wait_is_not_visible(locator, using=By.CSS_SELECTOR, **kwargs)
 
     def wait_is_not_visible(self, locator, using, timeout=5):
         try:
@@ -148,7 +148,12 @@ class Browser:
         return self.set_input_value(locator, value, using=By.ID)
 
     def set_input_value_by_css(self, locator, value):
+        self.clear_input_value(locator, using=By.CSS_SELECTOR)
         return self.set_input_value(locator, value, using=By.CSS_SELECTOR)
+
+    def clear_input_value(self, locator, using):
+        if self.wait_is_visible(locator, using):
+            self._browser.find_element(by=using, value=locator).clear()
 
     def set_input_value(self, locator, value, using):
         if self.wait_is_visible(locator, using):
@@ -164,8 +169,7 @@ class FirefoxBrowser(Browser):
         # Customize Firefox instance.
         options = webdriver.FirefoxOptions()
         # Run in headless mode.
-        options.headless = self.config.getboolean('selenium', 'headless',
-                                                  fallback=True)
+        options.headless = self.config.getboolean('selenium', 'headless', fallback=True)
 
         # Set headless mode width / height.
         if options.headless:
@@ -173,8 +177,7 @@ class FirefoxBrowser(Browser):
             os.environ['MOZ_HEADLESS_HEIGHT'] = '1080'
 
         # Set Firefox binary location
-        binary_location = path.join(path.expanduser('~'),
-                                    '.local', 'firefox', 'firefox')
+        binary_location = path.join(path.expanduser('~'), '.local', 'firefox', 'firefox')
         if path.exists(binary_location):
             options.binary_location = binary_location
 
@@ -185,8 +188,7 @@ class FirefoxBrowser(Browser):
             options.profile.set_preference(preference, False)
 
         return {
-            'executable_path': path.join(path.expanduser('~'),
-                                         '.local', 'bin', 'geckodriver'),
+            'executable_path': path.join(path.expanduser('~'), '.local', 'bin', 'geckodriver'),
             'service_log_path': get_file_path('var/log/geckodriver.log'),
             'options': options,
         }

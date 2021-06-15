@@ -4,7 +4,7 @@ hub_url = selenium hub url
 
 
 [db]
-sqlalchemy.url = sqlite:////home/sandbox/ml/var/ml.db
+sqlalchemy.url = sqlite:///%(here)s/../var/ml.db
 sqlalchemy.pool_pre_ping = true
 sqlalchemy.pool_recycle = 3600
 
@@ -46,36 +46,32 @@ book_urls_query = ["div.description-list-section > dl > dd:nth-child(2) > a", "d
 [libraries:4949]
 id = 4949
 search_fields = ["title"]
-url = https://opac.ksiaznica.bielsko.pl/
+url = https://opac.ksiaznica.bielsko.pl/search
 title = Katalog Biblioteki
 shelf_name = shelf name
 accepted_locations = ["Słowackiego 17a", "11 Listopada 40"]
-accepted_locations_query = ["//mat-panel-title[contains(., 'Zasoby dostępne')]/ancestor::mat-expansion-panel//span[contains(., 'Biblioteka Główna')]", "//mat-panel-title[contains(., 'Zasoby dostępne')]/ancestor::mat-expansion-panel//span[contains(., 'Dzielnicowa Biblioteka Publiczna')]"]
-main_page_query = //mat-toolbar//span[contains(., 'Strona główna')]
-search_form_query = mat-card#searchCard
-add_search_form_query = button.mat-icon-button[aria-label='Dodaj warunek']
-search_input_query = input#searchInput
-add_search_input_query = .condition-group-form input[placeholder='Wpisz szukaną frazę...']
+accepted_locations_query = ["//mat-checkbox[not(contains(@class, 'mat-checkbox-checked'))]/label/span[normalize-space(text())='Biblioteka Główna']", "//mat-checkbox[not(contains(@class, 'mat-checkbox-checked'))]/label/span[normalize-space(text())='Dzielnicowa Biblioteka Publiczna']"]
+search_page_query = //mat-toolbar//span[normalize-space(text())='Wyszukaj']
 search_autocomplete_query = .mat-autocomplete-visible
-search_by_query = .mat-select[aria-label='Wybierz indeks w którym chcesz wyszukiwać']
-add_search_by_query = .condition-group-form .mat-select[aria-label='Wyszukaj po..']
-add_operator_query = .condition-group-form .mat-select[aria-label='Operator']
-search_by_isbn_query = //mat-option/span[normalize-space(text())='ISBN']
+expand_search_form_query = button.mat-icon-button[aria-label='Otwótrz wyszukiwanie zaawansowane']
+search_input_query = div.search-box-container input[placeholder='Wpisz szukaną frazę...']
+search_by_query = div.search-box-container .search-index .mat-select[aria-label='Wyszukaj po...']
 search_by_title_query = //mat-option/span[normalize-space(text())='Tytuł']
 search_by_author_query = //mat-option/span[normalize-space(text())='Autor']
-book_document_query = //mat-checkbox/label/span[contains(., 'Książka')]
+add_search_input_query = div.condition-group-form input[placeholder='Wpisz szukaną frazę...']
+add_search_form_query = button.mat-icon-button[aria-label='Dodaj warunek']
+add_search_by_query = .condition-group-form .mat-select[aria-label='Wyszukaj po...']
+add_operator_query = .condition-group-form .mat-select[aria-label='Operator']
+book_document_query = //mat-checkbox[not(contains(@class, 'mat-checkbox-checked'))]/label/span[normalize-space(text())='Książka']
 search_and_query = //mat-option/span[normalize-space(text())='i']
-search_button_query = button.HomeSearchButton
-add_search_button_query = button.mat-icon-button[aria-label='Wyszukaj w katalogu wpisaną frazę']
-available_locations_query = //mat-panel-title[contains(., 'Zasoby dostępne')]
-more_locations_query = //mat-panel-title[contains(., 'Zasoby dostępne')]/ancestor::mat-expansion-panel//span[contains(., 'więcej')]
-button_availability_query = button[aria-label^="Dostępność"]
-button_available_query = //button[contains(., 'Dostępne')]
+search_button_query = button.mat-icon-button[aria-label='Wyszukaj w katalogu wpisaną frazę']
+available_locations_query = //mat-panel-title[normalize-space(text())='Lokalizacja']
+button_available_query = //mat-checkbox[not(contains(@class, 'mat-checkbox-checked'))]/label/span[normalize-space(text())='Pokaż tylko dostępne']
 result_row_query = div[aria-label^='Wyszukana pozycja']
 no_results_query = app-no-result
 action_button_query = button.main-action
 action_modal_query = .mat-dialog-container
-modal_loading_overlay = div.loading-bg
+modal_loading_overlay_query = div.overlay
 modal_only_available_query = //span[contains(., 'Wyświetl tylko filie z dostępną pozycją')]
 modal_no_results_query = //div[@class='mat-dialog-content']//p[contains(., 'Brak wyników')]
 modal_result_row_query = div.mat-dialog-content > div.no-phone > div.row
@@ -86,7 +82,7 @@ modal_close_button = //span[contains(., 'Zamknij')]
 
 [libraries:5004]
 id = 5004
-search_fields = ["title_and_author"]
+search_fields = ["title"]
 url = https://katalog.rajska.info/catalog
 base_url = https://katalog.rajska.info
 news_url_template = https://katalog.rajska.info/news?{0}&{1}&{2}{3}
@@ -99,7 +95,23 @@ document_type_title = Wybierz: Książka
 language_title = Wybierz: polski
 pagination_value = 100
 last_page_title = Ostatnia
-
+modal_confirm_query = .modal-dialog input.btn-primary
+main_page_query = h1.library_title-pages > a
+search_input_query = #SimpleSearchForm_q
+search_button_query = .btn.search-main-btn
+result_header_query = .row.row-full-text
+search_value_query = "{0}" AND "{1}"
+no_results_query = .info-empty
+pager_query = .btn-group>.hidden-xs
+pager_menu_query = .btn-group.open>.dropdown-menu
+pager_option_query = .btn-group.open>.dropdown-menu>li:last-child
+search_results_query = dl.dl-horizontal
+library_items_query = div.prolibitem
+yii_token_query = input[name="YII_CSRF_TOKEN"]
+location_details_query = dl.dl-horizontal dd
+a11y_docid_key = data-item-id
+a11y_doclibid_key = data-item-lib-id
+a11y_locationid_key = data-item-location-id
 
 [loggers]
 keys = root, script
