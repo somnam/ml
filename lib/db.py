@@ -39,7 +39,6 @@ class Handler:
                 cursor.execute("PRAGMA synchronous=NORMAL;")
                 cursor.close()
 
-        # Connector pool class must be changed for multithreaded connections.
         self.engine = engine_from_config(configuration=Config()['db'])
         self.session_factory = sessionmaker(bind=self.engine)
         self.scoped_session = scoped_session(self.session_factory)

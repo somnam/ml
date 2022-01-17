@@ -118,8 +118,18 @@ class LibraryScraper:
 
         # Fetch status using worker nodes.
         with concurrent.futures.ThreadPoolExecutor(max_workers=self.nodes) as executor:
-            books_info_from_nodes = executor.map(self.fetch_books_info_using_node,
-                                                 shelf_books_per_node)
+            futures = concurrent.futures.wait([
+                executor.submit(self.fetch_books_info_using_node, book)
+                for book in shelf_books_per_node
+            ])
+
+            books_info_from_nodes = []
+            for future in futures.done:
+                if future.exception() is None:
+                    books_info_from_nodes.append(future.result())
+                else:
+                    raise future.exception()
+
         # Join results from nodes into a single list.
         books_info = [
             book_info
